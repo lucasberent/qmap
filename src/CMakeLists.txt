@@ -74,10 +74,13 @@ if (Z3_FOUND)
 	add_qmap_library(exact ExactMapper)
 	# add encodings 
 	target_sources(${PROJECT_NAME}_exact_lib PUBLIC
-				${CMAKE_CURRENT_SOURCE_DIR}/Encodings.cpp
-				${${PROJECT_NAME}_SOURCE_DIR}/include/Encodings.hpp)
+			${CMAKE_CURRENT_SOURCE_DIR}/Encodings.cpp
+			${${PROJECT_NAME}_SOURCE_DIR}/include/Encodings.hpp)
 	# add Z3 library
 	target_link_libraries(${PROJECT_NAME}_exact_lib PUBLIC z3::z3lib)
+	# sat encoder project library
+	add_qmap_library(satencoder SatEncoder)
+	target_link_libraries(${PROJECT_NAME}_satencoder_lib PUBLIC z3::z3lib)
 else()
 	message(WARNING "Z3 library not found. Exact mapping library cannot be built without Z3 and will thus not be availbale as target")
 endif ()

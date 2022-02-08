@@ -46,4 +46,7 @@ if (TARGET ${PROJECT_NAME}_exact_lib)
 	                 ${CMAKE_CURRENT_SOURCE_DIR}/test_exact.cpp)
 endif ()
 
-
+if (TARGET ${PROJECT_NAME}_satencoder_lib)
+	package_add_test(${PROJECT_NAME}_satencoder_test satencoder
+			${CMAKE_CURRENT_SOURCE_DIR}/test_satencoder.cpp)
+endif ()
