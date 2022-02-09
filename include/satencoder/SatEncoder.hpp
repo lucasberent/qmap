@@ -30,26 +30,11 @@ public:
     void checkSatisfiability(qc::QuantumComputation& circuitOne, std::vector<std::string>& inputs);
 
 private:
-    class Statistics {
-    private:
-        unsigned long nrOfGates            = 0; // # gates in ckt
-        unsigned long nrOfSatVars          = 0; // # sat variables
-        unsigned long nrOfGenerators       = 0; // # unique generators appearing in ckt for given inputs
-        unsigned long nrOfFunctionalConstr = 0; // # functional z3 constraint
-    public:
-        void incrementNrOfGates() {
-            this->nrOfGates++;
-        }
-
-        void incrementNrOfFunctionalConstr() {
-            this->nrOfFunctionalConstr++;
-        }
-        unsigned long GetNrOfGenerators() const {
-            return nrOfGenerators;
-        }
-        void SetNrOfGenerators(unsigned long nr_of_generators) {
-            nrOfGenerators = nr_of_generators;
-        }
+    struct Statistics {
+        std::size_t nrOfGates            = 0U; // # gates in ckt
+        std::size_t nrOfSatVars          = 0U; // # sat variables
+        std::size_t nrOfGenerators       = 0U; // # unique generators appearing in ckt for given inputs
+        std::size_t nrOfFunctionalConstr = 0U; // # functional z3 constraint
     };
 
     class QState {
@@ -60,36 +45,33 @@ private:
         boost::uuids::uuid                   prevGenId;
 
     public:
-        unsigned long                               GetN() const;
-        void                                        SetN(unsigned long n);
-        const std::vector<boost::dynamic_bitset<>>& GetX() const;
-        void                                        SetX(const std::vector<boost::dynamic_bitset<>>& x);
-        const std::vector<boost::dynamic_bitset<>>& GetZ() const;
-        void                                        SetZ(const std::vector<boost::dynamic_bitset<>>& z);
-        const std::vector<int>&                     GetR() const;
-        void                                        SetR(const std::vector<int>& r);
-        const boost::uuids::uuid&                   GetPrevGenId() const;
-        void                                        SetPrevGenId(const boost::uuids::uuid& prev_gen_id);
-        std::vector<boost::dynamic_bitset<>>        getLevelGenerator();
-        void                                        applyCNOT(unsigned long control, unsigned long target);
-        void                                        applyH(unsigned long target);
-        void                                        applyS(unsigned long target);
-        void                                        printStateTableau();
+        void                                                      SetN(unsigned long n);
+        [[nodiscard]] const std::vector<boost::dynamic_bitset<>>& GetX() const;
+        void                                                      SetX(const std::vector<boost::dynamic_bitset<>>& x);
+        void                                                      SetZ(const std::vector<boost::dynamic_bitset<>>& z);
+        void                                                      SetR(const std::vector<int>& r);
+        [[nodiscard]] const boost::uuids::uuid&                   GetPrevGenId() const;
+        void                                                      SetPrevGenId(const boost::uuids::uuid& prev_gen_id);
+        [[nodiscard]] std::vector<boost::dynamic_bitset<>>        getLevelGenerator() const;
+        void                                                      applyCNOT(unsigned long control, unsigned long target);
+        void                                                      applyH(unsigned long target);
+        void                                                      applyS(unsigned long target);
+        void                                                      printStateTableau();
     };
     class CircuitRepresentation {
     public:
         std::vector<std::map<boost::uuids::uuid, boost::uuids::uuid>>      generatorMappings; // list of generatorId <> generatorId maps. One map per level
         std::map<boost::uuids::uuid, std::vector<boost::dynamic_bitset<>>> idGeneratorMap;    // id <> generator map
     };
-    std::map<std::vector<boost::dynamic_bitset<>>, long> generators;                                                                     // global generator <> integer (== value of symbolic encoding) map
-    QState                                               initializeState(unsigned long nrOfInputs, std::string input);                   // initialize circuit tableaus for states corresponding to inputs
-    bool                                                 isClifford(qc::QuantumComputation& qc);                                         // true if circuit uses only clifford gates
-    SatEncoder::CircuitRepresentation                    preprocessCircuit(qc::DAG& dag, std::vector<std::string>& inputs);              // construct data structures needed for SAT encoding. Input expected as string of stabilizers, e.g. XZZX = +00+, default = Z...Z = 0...0
-    z3::solver                                           constructSatInstance(SatEncoder::CircuitRepresentation& circuitRepresentation); // construct z3 instance. Assumes prepocessCircuit() has been run before.
-    z3::solver                                           constructMiterInstance(SatEncoder::CircuitRepresentation& circuitOneRepresentation, SatEncoder::CircuitRepresentation& circuitTwoRepresentation);
-    bool                                                 runZ3(z3::solver& solver);
-    Statistics                                           stats;
-    void                                                 printStats();
+    std::map<std::vector<boost::dynamic_bitset<>>, std::size_t> generators;                                                                     // global generator <> integer (== value of symbolic encoding) map
+    static QState                                               initializeState(unsigned long nrOfInputs, std::string input);                   // initialize circuit tableaus for states corresponding to inputs
+    static bool                                                 isClifford(qc::QuantumComputation& qc);                                         // true if circuit uses only clifford gates
+    SatEncoder::CircuitRepresentation                           preprocessCircuit(qc::DAG& dag, std::vector<std::string>& inputs);              // construct data structures needed for SAT encoding. Input expected as string of stabilizers, e.g. XZZX = +00+, default = Z...Z = 0...0
+    z3::solver                                                  constructSatInstance(SatEncoder::CircuitRepresentation& circuitRepresentation); // construct z3 instance. Assumes prepocessCircuit() has been run before.
+    z3::solver                                                  constructMiterInstance(SatEncoder::CircuitRepresentation& circuitOneRepresentation, SatEncoder::CircuitRepresentation& circuitTwoRepresentation);
+    static bool                                                 runZ3(z3::solver& solver);
+    Statistics                                                  stats;
+    void                                                        printStats();
 };
 
 #endif //QMAP_SATENCODER_HPP
