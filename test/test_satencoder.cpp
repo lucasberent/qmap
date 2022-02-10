@@ -13,17 +13,16 @@
 class SatEncoderTest: public testing::TestWithParam<std::string> {
 protected:
     std::string test_example_dir      = "./examples/";
-    std::string test_architecture_dir = "./architectures/";
-    std::string test_calibration_dir  = "./calibration/";
+    qc::QuantumComputation circuitOne{};
+    qc::QuantumComputation circuitTwo{};
 
     void SetUp() override {
     }
 };
-TEST(SatEncoderTest, CheckEqualWhenEqual) {
-    qc::QuantumComputation circuitOne{};
-    qc::QuantumComputation circuitTwo{};
-    circuitOne.import("./examples/bell.qasm");
-    circuitTwo.import("./examples/bell.qasm");
+TEST_F(SatEncoderTest, CheckEqualWhenEqual) {
+
+    circuitOne.import(test_example_dir + "bell.qasm");
+    circuitTwo.import(test_example_dir + "bell.qasm");
     SatEncoder               sat_encoder;
     std::vector<std::string> inputs;
 
@@ -32,9 +31,8 @@ TEST(SatEncoderTest, CheckEqualWhenEqual) {
     EXPECT_EQ(result, true);
 }
 
-TEST(SatEncoderTest, SatTwoQubitBellCircuit) {
-    qc::QuantumComputation circuitOne{};
-    circuitOne.import("./examples/bell.qasm");
+TEST_F(SatEncoderTest, SatTwoQubitBellCircuit) {
+    circuitOne.import(test_example_dir + "bell.qasm");
     SatEncoder               sat_encoder;
     std::vector<std::string> inputs;
 

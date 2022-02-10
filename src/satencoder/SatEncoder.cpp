@@ -14,17 +14,20 @@
 //
 bool SatEncoder::testEqual(qc::QuantumComputation& circuitOne, qc::QuantumComputation& circuitTwo, std::vector<std::string>& inputs) {
     if (!isClifford(circuitOne) || !isClifford(circuitTwo)) {
-        std::cerr << "Circits are not clifford circuits" << std::endl;
+        std::cerr << "Circuits are not Clifford circuits" << std::endl;
         return false;
     }
-    qc::DAG                           dagOne                  = qc::CircuitOptimizer::constructDAG(circuitOne);
-    qc::DAG                           dagTwo                  = qc::CircuitOptimizer::constructDAG(circuitTwo);
-    SatEncoder::CircuitRepresentation circOneRep              = preprocessCircuit(dagOne, inputs);
-    SatEncoder::CircuitRepresentation circTwoRep              = preprocessCircuit(dagTwo, inputs);
-    auto                              before                  = std::chrono::high_resolution_clock::now();
-    auto                              solver                  = constructMiterInstance(circOneRep, circTwoRep);
-    auto                              after                   = std::chrono::high_resolution_clock::now();
-    auto                              satConstructionDuration = std::chrono::duration_cast<std::chrono::milliseconds>(after - before);
+    qc::DAG                           dagOne     = qc::CircuitOptimizer::constructDAG(circuitOne);
+    qc::DAG                           dagTwo     = qc::CircuitOptimizer::constructDAG(circuitTwo);
+    SatEncoder::CircuitRepresentation circOneRep = preprocessCircuit(dagOne, inputs);
+    SatEncoder::CircuitRepresentation circTwoRep = preprocessCircuit(dagTwo, inputs);
+
+    const auto  before = std::chrono::high_resolution_clock::now();
+    z3::context ctx{};
+    z3::solver  solver(ctx);
+    constructMiterInstance(circOneRep, circTwoRep, solver);
+    const auto after                   = std::chrono::high_resolution_clock::now();
+    const auto satConstructionDuration = std::chrono::duration_cast<std::chrono::milliseconds>(after - before);
     std::cout << "SAT construction complete - elapsed time for this task: " << satConstructionDuration.count();
     return runZ3(solver);
     //todo print stats
@@ -34,17 +37,21 @@ void SatEncoder::checkSatisfiability(qc::QuantumComputation& circuitOne, std::ve
         std::cerr << "Circuit is not Clifford Circuit." << std::endl;
         return;
     }
-    qc::DAG dag                   = qc::CircuitOptimizer::constructDAG(circuitOne);
-    auto    before                = std::chrono::high_resolution_clock::now();
-    auto    circRep               = this->preprocessCircuit(dag, inputs);
-    auto    after                 = std::chrono::high_resolution_clock::now();
-    auto    preprocessingDuration = std::chrono::duration_cast<std::chrono::milliseconds>(after - before);
+    qc::DAG    dag                   = qc::CircuitOptimizer::constructDAG(circuitOne);
+    auto       before                = std::chrono::high_resolution_clock::now();
+    auto       circRep               = preprocessCircuit(dag, inputs);
+    auto       after                 = std::chrono::high_resolution_clock::now();
+    const auto preprocessingDuration = std::chrono::duration_cast<std::chrono::milliseconds>(after - before);
     std::cout << "Preprocessing construction complete - elapsed time (ms) for this task: " << preprocessingDuration.count() << std::endl;
-    before                       = std::chrono::high_resolution_clock::now();
-    auto solver                  = this->constructSatInstance(circRep);
+
+    before = std::chrono::high_resolution_clock::now();
+    z3::context ctx{};
+    z3::solver  solver(ctx);
+    constructSatInstance(circRep, solver);
     after                        = std::chrono::high_resolution_clock::now();
     auto satConstructionDuration = std::chrono::duration_cast<std::chrono::milliseconds>(after - before);
     std::cout << "SAT construction complete - elapsed time (ms) for this task: " << satConstructionDuration.count() << std::endl;
+
     // todo print to file
     // data: ckt size: #gates/depth, #different generators (states), #sat variables, time needed for construction
     // ckt name, ckt size, equiv of not, #sat variables, #different generators
@@ -59,7 +66,7 @@ bool SatEncoder::runZ3(solver& solver) {
     auto sat               = solver.check();
     auto after             = std::chrono::high_resolution_clock::now();
     auto z3SolvingDuration = std::chrono::duration_cast<std::chrono::milliseconds>(after - before);
-    std::cout << "Z3 solving complete - elapsed time for this task: " << z3SolvingDuration.count();
+    std::cout << "Z3 solving complete - elapsed time for this task: " << z3SolvingDuration.count() << std::endl;
     if (sat == check_result::sat) {
         std::cout << "SATISFIABLE" << std::endl;
         result = true;
@@ -123,7 +130,7 @@ SatEncoder::CircuitRepresentation SatEncoder::preprocessCircuit(qc::DAG& dag, st
                 if (!dag.at(qubitCnt).empty() && dag.at(qubitCnt).at(levelCnt) != nullptr) {
                     stats.nrOfGates++;
                     auto          gate    = dag.at(qubitCnt).at(levelCnt)->get();
-                    unsigned long target  = gate->getTargets().at(0U);           //we assume we only have 1 target
+                    unsigned long target  = gate->getTargets().at(0U);          //we assume we only have 1 target
                     unsigned long control = gate->getControls().begin()->qubit; //we assume we only have 1 control
 
                     //apply gate of level to each generator
@@ -161,124 +168,158 @@ SatEncoder::CircuitRepresentation SatEncoder::preprocessCircuit(qc::DAG& dag, st
     return representation;
 }
 //construct z3 instance from preprocessing information
-solver SatEncoder::constructSatInstance(SatEncoder::CircuitRepresentation& circuitRepresentation) {
-    auto        generatorCnt              = generators.size();
-    unsigned    nrOfVariablesNeeded       = ceil(log(generatorCnt));
-    auto        depth                     = circuitRepresentation.generatorMappings.size();
-    bool        blockingConstraintsNeeded = (generatorCnt < (1ULL << nrOfVariablesNeeded));
-    z3::context z3Context;
-    //for stats
-    //nrOfGenerators = generatorCnt;
-    //nrOfSatVars    = nrOfVariablesNeeded;
+void SatEncoder::constructSatInstance(SatEncoder::CircuitRepresentation& circuitRepresentation, z3::solver& solver) {
+    // number of unique generators that need to be encoded
+    const auto generatorCnt = generators.size();
+    stats.nrOfGenerators    = generatorCnt;
 
-    // construct variable encoding for generators
-    std::vector<expr> satVariables{};
-    satVariables.reserve(depth);
-    std::string bitvName = "x^";
+    // bitwidth required to encode the generators
+    const auto bitwidth = static_cast<std::size_t>(std::ceil(std::log(generatorCnt)));
+
+    // whether the number of generators is a power of two or not
+    bool blockingConstraintsNeeded = std::log2(generatorCnt) < static_cast<double>(bitwidth);
+
+    // z3 context used throughout this function
+    auto& ctx = solver.ctx();
+
+    const auto        depth = circuitRepresentation.generatorMappings.size();
+    std::vector<expr> vars{};
+    vars.reserve(depth + 1U);
+    std::string bvName = "x^";
+
     std::cout << "Variables: " << std::endl;
-    for (std::size_t k = 0; k < depth; k++) {
-        std::stringstream varName{};
-        // create bitvector [x^k]_2 of size nrOfVariablesNeeded for each level k of ckt
-        varName << bitvName << k; //
-        satVariables.emplace_back(z3Context.bv_const(varName.str().c_str(), nrOfVariablesNeeded));
-        std::cout << satVariables[k] << std::endl;
+    for (std::size_t k = 0U; k <= depth; k++) {
+        // create bitvector [x^k]_2 with respective bitwidth for each level k of ckt
+        std::stringstream ss{};
+        ss << bvName << k; //
+        vars.emplace_back(ctx.bv_const(ss.str().c_str(), bitwidth));
+        std::cout << vars.back() << std::endl;
     }
-    z3::solver z3Solver(z3Context);
+
     std::cout << "Functional Constraints: " << std::endl;
-    for (std::size_t i = 1; i < circuitRepresentation.generatorMappings.size(); i++) {
-        auto tmp = circuitRepresentation.generatorMappings.at(i); // generator<>generator map for level i
-        for (auto& ti: tmp) {
-            const auto g1 = generators.at(circuitRepresentation.idGeneratorMap.at(ti.first));
-            const auto g2 = generators.at(circuitRepresentation.idGeneratorMap.at(ti.second));
+    for (std::size_t i = 0U; i < depth; i++) {
+        const auto layer = circuitRepresentation.generatorMappings.at(i); // generator<>generator map for level i
+        for (const auto& [from, to]: layer) {
+            const auto g1 = generators.at(circuitRepresentation.idGeneratorMap.at(from));
+            const auto g2 = generators.at(circuitRepresentation.idGeneratorMap.at(to));
+
+            // create [x^l]_2 = i => [x^l']_2 = k for each generator mapping
+            const auto left  = vars[i] == ctx.bv_val(static_cast<std::uint64_t>(g1), bitwidth);
+            const auto right = vars[i + 1U] == ctx.bv_val(static_cast<std::uint64_t>(g2), bitwidth);
+            const auto cons  = implies(left, right);
+            solver.add(cons);
+
             stats.nrOfFunctionalConstr++;
-            auto cons = implies(satVariables[i - 1] == z3Context.bv_val(static_cast<std::uint64_t>(g1), nrOfVariablesNeeded),
-                                satVariables[i] == z3Context.bv_val(static_cast<std::uint64_t>(g2), nrOfVariablesNeeded));
-            z3Solver.add(cons); // create [x^l]_2 = i => [x^l']_2 = k for each generator mapping
             std::cout << cons << std::endl;
         }
     }
-    std::cout << "Blocking Constraints: " << std::endl;
-    if (blockingConstraintsNeeded) {
-        // each bitvector assignment x^g must be < generatorCnt
-        for (auto& satVariable: satVariables) {
-            auto bv = ult(satVariable, static_cast<int>(generatorCnt));
-            std::cout << bv << std::endl;
-            z3Solver.add(bv); // [x^g]_2 < m
-        }
-    }
-    return z3Solver;
 }
 
-solver SatEncoder::constructMiterInstance(SatEncoder::CircuitRepresentation& circOneRep, SatEncoder::CircuitRepresentation& circTwoRep) {
-    unsigned long generatorCnt              = generators.size();
-    stats.nrOfGenerators                    = generatorCnt;
-    unsigned long nrOfVariablesNeeded       = ceil(log(generatorCnt));
-    auto          depth                     = circOneRep.generatorMappings.size();
-    bool          blockingConstraintsNeeded = (generatorCnt < (1ULL << nrOfVariablesNeeded));
-    context       z3Context;
-    //for stats
-    //nrOfGenerators = generatorCnt;
-    //nrOfSatVars    = nrOfVariablesNeeded;
+void SatEncoder::constructMiterInstance(SatEncoder::CircuitRepresentation& circOneRep, SatEncoder::CircuitRepresentation& circTwoRep, z3::solver& solver) {
+    // number of unique generators that need to be encoded
+    const auto generatorCnt = generators.size();
+    stats.nrOfGenerators    = generatorCnt;
 
-    std::vector<expr> satVariables{};
-    satVariables.reserve(depth);
-    std::string bitvName = "x^";
+    // bitwidth required to encode the generators
+    const auto bitwidth = static_cast<std::size_t>(std::ceil(std::log(generatorCnt)));
+
+    // whether the number of generators is a power of two or not
+    bool blockingConstraintsNeeded = std::log2(generatorCnt) < static_cast<double>(bitwidth);
+
+    // z3 context used throughout this function
+    auto& ctx = solver.ctx();
+
+    /// encode first circuit
+    const auto        depthOne = circOneRep.generatorMappings.size();
+    std::vector<expr> varsOne{};
+    varsOne.reserve(depthOne + 1U);
+    std::string bvName = "x^";
+
     std::cout << "Variables: " << std::endl;
-
-    for (std::size_t k = 0; k < depth; k++) {
-        // create bitvector [x^k]_2 of size nrOfVariablesNeeded for each level k of ckt
-        std::stringstream varName{};
-        varName << bitvName << k; //
-        satVariables[k] = (z3Context.bv_const(varName.str().c_str(), nrOfVariablesNeeded));
-        std::cout << satVariables[k] << std::endl;
+    for (std::size_t k = 0U; k <= depthOne; k++) {
+        // create bitvector [x^k]_2 with respective bitwidth for each level k of ckt
+        std::stringstream ss{};
+        ss << bvName << k; //
+        varsOne.emplace_back(ctx.bv_const(ss.str().c_str(), bitwidth));
+        std::cout << varsOne.back() << std::endl;
     }
-    solver z3Solver(z3Context);
+
     std::cout << "Functional Constraints: " << std::endl;
-    for (std::size_t i = 1; i < circOneRep.generatorMappings.size(); i++) {
-        auto tmp = circOneRep.generatorMappings.at(i); // generator<>generator map for level i
-        for (auto& ti: tmp) {
-            auto g1 = generators.at(circOneRep.idGeneratorMap.at(ti.first));
-            auto g2 = generators.at(circOneRep.idGeneratorMap.at(ti.second));
-            //nrOfFunctionalConstr++; // for stats
-            auto cons = implies(satVariables[i - 1] == z3Context.bv_val(static_cast<std::uint64_t>(g1), nrOfVariablesNeeded),
-                                satVariables[i] == z3Context.bv_val(static_cast<std::uint64_t>(g2), nrOfVariablesNeeded));
-            z3Solver.add(cons); // create [x^l]_2 = i => [x^l']_2 = k for each generator mapping
+    for (std::size_t i = 0U; i < depthOne; i++) {
+        const auto layer = circOneRep.generatorMappings.at(i); // generator<>generator map for level i
+        for (const auto& [from, to]: layer) {
+            const auto g1 = generators.at(circOneRep.idGeneratorMap.at(from));
+            const auto g2 = generators.at(circOneRep.idGeneratorMap.at(to));
+
+            // create [x^l]_2 = i => [x^l']_2 = k for each generator mapping
+            const auto left  = varsOne[i] == ctx.bv_val(static_cast<std::uint64_t>(g1), bitwidth);
+            const auto right = varsOne[i + 1U] == ctx.bv_val(static_cast<std::uint64_t>(g2), bitwidth);
+            const auto cons  = implies(left, right);
+            solver.add(cons);
+
+            stats.nrOfFunctionalConstr++;
             std::cout << cons << std::endl;
         }
     }
 
     if (blockingConstraintsNeeded) {
-        for (auto& satVariable: satVariables) {
-            z3Solver.add(ult(satVariable, static_cast<int>(generatorCnt))); // [x^l]_2 < m
-        }
-    }
-    // circuit 2
-    depth                     = circTwoRep.generatorMappings.size();
-    blockingConstraintsNeeded = (generatorCnt < (1ULL << nrOfVariablesNeeded));
-    std::cout << "Functional Constraints Circuit 2: " << std::endl;
-    // construct functional encoding for gates
-    for (std::size_t i = 1; i < circTwoRep.generatorMappings.size(); i++) {
-        auto tmp = circTwoRep.generatorMappings.at(i); // generator<>generator map for level i
-        for (auto& ti: tmp) {
-            auto g1 = generators.at(circTwoRep.idGeneratorMap.at(ti.first));
-            auto g2 = generators.at(circTwoRep.idGeneratorMap.at(ti.second));
-            //nrOfFunctionalConstr++; // for stats
-            auto cons = implies(satVariables[i - 1] == z3Context.bv_val(static_cast<std::uint64_t>(g1), nrOfVariablesNeeded),
-                                satVariables[i] == z3Context.bv_val(static_cast<std::uint64_t>(g2), nrOfVariablesNeeded));
-            z3Solver.add(cons); // create [x^l]_2 = i => [x^l']_2 = k for each generator mapping
+        std::cout << "Blocking Constraints: " << std::endl;
+        for (const auto& var: varsOne) {
+            const auto cons = var < ctx.bv_val(static_cast<std::uint64_t>(generatorCnt), bitwidth);
+            solver.add(cons); // [x^l]_2 < m
             std::cout << cons << std::endl;
         }
     }
 
-    // miter: check if [g^l]_2 == [g^l']_2 for [g^l]_2 encoding last level of circut one and [g^l']_2 encoding last level of circuit two
-    // that is, if generator of last level corresponding to some variable assignment of the variables of the signal of the last level
-    // are equal then the 'output' is equal.
-    auto maxDepthCircOne = circOneRep.generatorMappings.size() - 1U;
-    auto maxDepthCircTwo = circTwoRep.generatorMappings.size() - 1U;
-    auto miter           = ugt(satVariables[maxDepthCircOne] ^ satVariables[maxDepthCircTwo], 1);
+    /// encode second circuit
+    auto              depthTwo = circTwoRep.generatorMappings.size();
+    std::vector<expr> varsTwo{};
+    varsOne.reserve(depthTwo + 1U);
+    bvName = "x'^";
+
+    std::cout << "Variables: " << std::endl;
+    for (std::size_t k = 0U; k <= depthTwo; k++) {
+        // create bitvector [x^k]_2 with respective bitwidth for each level k of ckt
+        std::stringstream ss{};
+        ss << bvName << k; //
+        varsTwo.emplace_back(ctx.bv_const(ss.str().c_str(), bitwidth));
+        std::cout << varsTwo.back() << std::endl;
+    }
+
+    std::cout << "Functional Constraints: " << std::endl;
+    for (std::size_t i = 0U; i < depthTwo; i++) {
+        const auto layer = circTwoRep.generatorMappings.at(i); // generator<>generator map for level i
+        for (const auto& [from, to]: layer) {
+            const auto g1 = generators.at(circTwoRep.idGeneratorMap.at(from));
+            const auto g2 = generators.at(circTwoRep.idGeneratorMap.at(to));
+
+            // create [x^l]_2 = i => [x^l']_2 = k for each generator mapping
+            const auto left  = varsTwo[i] == ctx.bv_val(static_cast<std::uint64_t>(g1), bitwidth);
+            const auto right = varsTwo[i + 1U] == ctx.bv_val(static_cast<std::uint64_t>(g2), bitwidth);
+            const auto cons  = implies(left, right);
+            solver.add(cons);
+
+            stats.nrOfFunctionalConstr++;
+            std::cout << cons << std::endl;
+        }
+    }
+
+    if (blockingConstraintsNeeded) {
+        std::cout << "Blocking Constraints: " << std::endl;
+        for (const auto& var: varsTwo) {
+            const auto cons = var < ctx.bv_val(static_cast<std::uint64_t>(generatorCnt), bitwidth);
+            solver.add(cons); // [x^l]_2 < m
+            std::cout << cons << std::endl;
+        }
+    }
+
+    /// create miter structure
+    // if initial signals are the same, then the final signals have to be equal as well
+    const auto initial = varsOne.front() == varsTwo.front();
+    const auto final   = varsOne.back() == varsTwo.back();
+    const auto miter   = implies(initial, final);
     std::cout << "Miter: " << miter << std::endl;
-    z3Solver.add(miter);
-    return z3Solver;
+    solver.add(miter);
 }
 
 bool SatEncoder::isClifford(qc::QuantumComputation& qc) {
@@ -305,12 +346,12 @@ std::vector<boost::dynamic_bitset<>> SatEncoder::QState::getLevelGenerator() con
 
         //copy x and z vectors and r bit into one bitvector = 1 generator
         for (std::size_t j = 0; j < n; j++) {
-            if (idx < this->n) { //x
-                gen[idx++] = this->GetX().at(i)[j];
-            } else if (idx < 2 * this->n) { //z
-                gen[idx++] = this->z.at(i)[j];
+            if (idx < n) { //x
+                gen[idx++] = GetX().at(i)[j];
+            } else if (idx < 2 * n) { //z
+                gen[idx++] = z.at(i)[j];
             } else { //r
-                if (this->r.at(i) == 1) {
+                if (r.at(i) == 1) {
                     gen[idx++] = true;
                 } else {
                     gen[idx++] = false; //either 0 or 1 possible for phase
@@ -375,21 +416,21 @@ SatEncoder::QState SatEncoder::initializeState(unsigned long nrOfQubits, std::st
 }
 
 void SatEncoder::QState::applyCNOT(unsigned long control, unsigned long target) {
-    if (target > this->n || target < 0 ||
-        control > this->n || control < 0) {
+    if (target > n || target < 0 ||
+        control > n || control < 0) {
         return;
     }
-    for (std::size_t i = 0U; i < this->n; ++i) {
+    for (std::size_t i = 0U; i < n; ++i) {
         r[i] ^= (x[i][control] * z[i][target]) * (x[i][target] ^ z[i][control] ^ 1);
         x[i][target] ^= x[i][control];
         z[i][control] ^= z[i][target];
     }
 }
 void SatEncoder::QState::applyH(unsigned long target) {
-    if (target > this->n || target < 0) {
+    if (target > n || target < 0) {
         return;
     }
-    for (std::size_t i = 0U; i < this->n; i++) {
+    for (std::size_t i = 0U; i < n; i++) {
         r[i] ^= x[i][target] * z[i][target];
         x[i][target] ^= z[i][target];
         z[i][target] = x[i][target] ^ z[i][target];
@@ -397,28 +438,28 @@ void SatEncoder::QState::applyH(unsigned long target) {
     }
 }
 void SatEncoder::QState::applyS(unsigned long target) {
-    if (target > this->n || target < 0) {
+    if (target > n || target < 0) {
         return;
     }
-    for (std::size_t i = 0U; i < this->n; ++i) {
+    for (std::size_t i = 0U; i < n; ++i) {
         r[i] ^= x[i][target] * z[i][target];
         z[i][target] ^= x[i][target];
     }
 }
-void SatEncoder::QState::SetN(unsigned long n) {
-    QState::n = n;
+void SatEncoder::QState::SetN(unsigned long N) {
+    QState::n = N;
 }
 const std::vector<boost::dynamic_bitset<>>& SatEncoder::QState::GetX() const {
     return x;
 }
-void SatEncoder::QState::SetX(const std::vector<boost::dynamic_bitset<>>& x) {
-    QState::x = x;
+void SatEncoder::QState::SetX(const std::vector<boost::dynamic_bitset<>>& X) {
+    QState::x = X;
 }
-void SatEncoder::QState::SetZ(const std::vector<boost::dynamic_bitset<>>& z) {
-    QState::z = z;
+void SatEncoder::QState::SetZ(const std::vector<boost::dynamic_bitset<>>& Z) {
+    QState::z = Z;
 }
-void SatEncoder::QState::SetR(const std::vector<int>& r) {
-    QState::r = r;
+void SatEncoder::QState::SetR(const std::vector<int>& R) {
+    QState::r = R;
 }
 const boost::uuids::uuid& SatEncoder::QState::GetPrevGenId() const {
     return prevGenId;
