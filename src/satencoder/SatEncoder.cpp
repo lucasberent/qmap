@@ -28,8 +28,8 @@ bool SatEncoder::testEqual(qc::QuantumComputation& circuitOne, qc::QuantumComput
     constructMiterInstance(circOneRep, circTwoRep, solver);
     const auto after                   = std::chrono::high_resolution_clock::now();
     const auto satConstructionDuration = std::chrono::duration_cast<std::chrono::milliseconds>(after - before);
-    std::cout << "SAT construction complete - elapsed time for this task: " << satConstructionDuration.count();
-    return runZ3(solver);
+    std::cout << "SAT construction complete - elapsed time (ms) for this task: " << satConstructionDuration.count() << std::endl;
+    return !isSatisfiable(solver); // if unsat circuits are equal
     //todo print stats
 }
 void SatEncoder::checkSatisfiability(qc::QuantumComputation& circuitOne, std::vector<std::string>& inputs) {
@@ -57,16 +57,16 @@ void SatEncoder::checkSatisfiability(qc::QuantumComputation& circuitOne, std::ve
     // ckt name, ckt size, equiv of not, #sat variables, #different generators
     // in z3 stats: :mk-bool-var :mk-binary-clause :mk-ternary-clause :mk-clause
     //print stats;
-    runZ3(solver);
+    isSatisfiable(solver);
 }
 
-bool SatEncoder::runZ3(solver& solver) {
+bool SatEncoder::isSatisfiable(solver& solver) {
     bool result            = false;
     auto before            = std::chrono::high_resolution_clock::now();
     auto sat               = solver.check();
     auto after             = std::chrono::high_resolution_clock::now();
     auto z3SolvingDuration = std::chrono::duration_cast<std::chrono::milliseconds>(after - before);
-    std::cout << "Z3 solving complete - elapsed time for this task: " << z3SolvingDuration.count() << std::endl;
+    std::cout << "Z3 solving complete - elapsed time (ms) for this task: " << z3SolvingDuration.count() << std::endl;
     if (sat == check_result::sat) {
         std::cout << "SATISFIABLE" << std::endl;
         result = true;
@@ -109,17 +109,21 @@ SatEncoder::CircuitRepresentation SatEncoder::preprocessCircuit(qc::DAG& dag, st
 
     // store generators of input state
     for (auto& state: states) {
-        auto initLevelGenerator = state.getLevelGenerator();
-        auto inspair            = generators.emplace(initLevelGenerator, uniqueGenCnt); // put generator into global map if not already present
-        if (inspair.second) {                                                           // if a new generator has been computed by this level (i.e., state changed)
+        auto               initLevelGenerator = state.getLevelGenerator();
+        auto               inspair            = generators.emplace(initLevelGenerator, uniqueGenCnt); // put generator into global map if not already present
+        boost::uuids::uuid genId{};
+        if (inspair.second) { // if a new generator has been computed by this level (i.e., state changed)
             uniqueGenCnt++;
-            boost::uuids::uuid genId = boost::uuids::random_generator()();
-            representation.idGeneratorMap.emplace(genId, initLevelGenerator);
-            state.SetPrevGenId(genId);
-            //no generator <> generator mapping for initial level
-            std::cout << "Init State:" << std::endl;
-            state.printStateTableau();
+            genId = boost::uuids::random_generator()();
+            generatorIdMap.emplace(initLevelGenerator, genId);
+        } else {
+            genId = generatorIdMap.at(initLevelGenerator);
         }
+        representation.idGeneratorMap.emplace(genId, initLevelGenerator);
+        state.SetPrevGenId(genId);
+        //no generator <> generator mapping for initial level
+        std::cout << "Init State:" << std::endl;
+        state.printStateTableau();
     }
 
     for (std::size_t levelCnt = 0; levelCnt < nrOfLevels; levelCnt++) {
@@ -136,14 +140,14 @@ SatEncoder::CircuitRepresentation SatEncoder::preprocessCircuit(qc::DAG& dag, st
                     //apply gate of level to each generator
                     for (auto& currState: states) {
                         if (gate->getType() == qc::OpType::H) {
-                            std::cout << "applying H to qubit " << target << std::endl;
+                            std::cout << "level " << levelCnt << " applying H to qubit " << target << std::endl;
                             currState.applyH(target);
                         } else if (gate->getType() == qc::OpType::S) {
-                            std::cout << "applying S to qubit " << target << std::endl;
+                            std::cout << "level " << levelCnt << " applying S to qubit " << target << std::endl;
                             currState.applyS(target);
                         } else if (gate->isControlled() && gate->getType() == qc::OpType::X) { //CNOT
                             if (qubitCnt == control) {                                         //CNOT is for control and target in DAG, only apply if current qubit is control
-                                std::cout << "applying CNOT with target: " << target << " control: " << control << std::endl;
+                                std::cout << "level " << levelCnt << " applying CNOT with target: " << target << " control: " << control << std::endl;
                                 currState.applyCNOT(control, target);
                             }
                         } else {
@@ -154,15 +158,21 @@ SatEncoder::CircuitRepresentation SatEncoder::preprocessCircuit(qc::DAG& dag, st
             }
         }
         for (auto& state: states) {
-            auto currLevelGen = state.getLevelGenerator();                      //extract generator representation from tableau (= list of paulis for each qubit)
-            auto inspair      = generators.emplace(currLevelGen, uniqueGenCnt); // put generator into global map if not already present
-            if (inspair.second) {                                               // new generator because newly inserted
+            std::cout << "state " << std::endl;
+            state.printStateTableau();
+            auto               currLevelGen = state.getLevelGenerator();                      //extract generator representation from tableau (= list of paulis for each qubit)
+            auto               inspair      = generators.emplace(currLevelGen, uniqueGenCnt); // put generator into global map if not already present
+            boost::uuids::uuid genId{};
+            if (inspair.second) { // new generator because newly inserted
                 uniqueGenCnt++;
-                boost::uuids::uuid genId = boost::uuids::random_generator()();
-                representation.idGeneratorMap.emplace(genId, currLevelGen);                                        // id <-> generator mapping
-                representation.generatorMappings.at(levelCnt).insert(std::make_pair(state.GetPrevGenId(), genId)); // insert generator <> generator mapping at position level in list
-                state.SetPrevGenId(genId);                                                                         // update previous generator id for next state
+                genId = boost::uuids::random_generator()();
+                generatorIdMap.emplace(currLevelGen, genId); // global generator <> id mapping for quick reverse lookup
+            } else {                                         // generator already in global map
+                genId = generatorIdMap.at(currLevelGen);
             }
+            representation.idGeneratorMap.emplace(genId, currLevelGen);                                        // id <-> generator mapping
+            representation.generatorMappings.at(levelCnt).insert(std::make_pair(state.GetPrevGenId(), genId)); // generator <> generator mapping at position level in list
+            state.SetPrevGenId(genId);                                                                         // update previous generator id for next state
         }
     }
     return representation;
@@ -316,7 +326,7 @@ void SatEncoder::constructMiterInstance(SatEncoder::CircuitRepresentation& circO
     /// create miter structure
     // if initial signals are the same, then the final signals have to be equal as well
     const auto initial = varsOne.front() == varsTwo.front();
-    const auto final   = varsOne.back() == varsTwo.back();
+    const auto final   = varsOne.back() != varsTwo.back();
     const auto miter   = implies(initial, final);
     std::cout << "Miter: " << miter << std::endl;
     solver.add(miter);
@@ -339,28 +349,24 @@ bool SatEncoder::isClifford(qc::QuantumComputation& qc) {
 }
 std::vector<boost::dynamic_bitset<>> SatEncoder::QState::getLevelGenerator() const {
     std::size_t                          size = (2U * n) + 1U;
-    std::vector<boost::dynamic_bitset<>> result(n);
-    std::size_t                          idx = 0U;
+    std::vector<boost::dynamic_bitset<>> result{};
+
     for (std::size_t i = 0U; i < n; i++) {
         boost::dynamic_bitset<> gen(size);
-
-        //copy x and z vectors and r bit into one bitvector = 1 generator
         for (std::size_t j = 0; j < n; j++) {
-            if (idx < n) { //x
-                gen[idx++] = GetX().at(i)[j];
-            } else if (idx < 2 * n) { //z
-                gen[idx++] = z.at(i)[j];
-            } else { //r
-                if (r.at(i) == 1) {
-                    gen[idx++] = true;
-                } else {
-                    gen[idx++] = false; //either 0 or 1 possible for phase
-                }
-            }
+            gen[j] = x.at(i)[j];
         }
-        idx = 0;
+        for (std::size_t j = 0; j < n; j++) {
+            gen[n + j] = z.at(i)[j];
+        }
+        if (r.at(i) == 1) {
+            gen[n + n] = true;
+        } else {
+            gen[n + n] = false; //either 0 or 1 possible for phase
+        }
         result.emplace_back(gen);
     }
+
     return result;
 }
 SatEncoder::QState SatEncoder::initializeState(unsigned long nrOfQubits, std::string input) {
@@ -468,6 +474,7 @@ void SatEncoder::QState::SetPrevGenId(const boost::uuids::uuid& prev_gen_id) {
     prevGenId = prev_gen_id;
 }
 void SatEncoder::QState::printStateTableau() {
+    std::cout << std::endl;
     for (std::size_t i = 0U; i < n; i++) {
         for (std::size_t j = 0; j < n; j++) {
             std::cout << x.at(i)[j];
@@ -480,4 +487,5 @@ void SatEncoder::QState::printStateTableau() {
         std::cout << r.at(i);
         std::cout << std::endl;
     }
+    std::cout << std::endl;
 }

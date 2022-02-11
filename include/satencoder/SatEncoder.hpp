@@ -63,14 +63,15 @@ private:
         std::vector<std::map<boost::uuids::uuid, boost::uuids::uuid>>      generatorMappings; // list of generatorId <> generatorId maps. One map per level
         std::map<boost::uuids::uuid, std::vector<boost::dynamic_bitset<>>> idGeneratorMap;    // id <> generator map
     };
-    std::map<std::vector<boost::dynamic_bitset<>>, std::size_t> generators;                                                                                         // global generator <> integer (== value of symbolic encoding) map
-    static QState                                               initializeState(unsigned long nrOfInputs, std::string input);                                       // initialize circuit tableaus for states corresponding to inputs
-    static bool                                                 isClifford(qc::QuantumComputation& qc);                                                             // true if circuit uses only clifford gates
-    SatEncoder::CircuitRepresentation                           preprocessCircuit(qc::DAG& dag, std::vector<std::string>& inputs);                                  // construct data structures needed for SAT encoding. Input expected as string of stabilizers, e.g. XZZX = +00+, default = Z...Z = 0...0
-    void                                                        constructSatInstance(SatEncoder::CircuitRepresentation& circuitRepresentation, z3::solver& solver); // construct z3 instance. Assumes prepocessCircuit() has been run before.
-    void                                                        constructMiterInstance(SatEncoder::CircuitRepresentation& circuitOneRepresentation, SatEncoder::CircuitRepresentation& circuitTwoRepresentation, z3::solver& solver);
-    static bool                                                 runZ3(z3::solver& solver);
-    Statistics                                                  stats;
+    std::map<std::vector<boost::dynamic_bitset<>>, std::size_t>        generators;                                                                                         // global generator <> integer (== value of symbolic encoding) map
+    std::map<std::vector<boost::dynamic_bitset<>>, boost::uuids::uuid> generatorIdMap;                                                                                     // generator <> id map
+    static QState                                                      initializeState(unsigned long nrOfInputs, std::string input);                                       // initialize circuit tableaus for states corresponding to inputs
+    static bool                                                        isClifford(qc::QuantumComputation& qc);                                                             // true if circuit uses only clifford gates
+    SatEncoder::CircuitRepresentation                                  preprocessCircuit(qc::DAG& dag, std::vector<std::string>& inputs);                                  // construct data structures needed for SAT encoding. Input expected as string of stabilizers, e.g. XZZX = +00+, default = Z...Z = 0...0
+    void                                                               constructSatInstance(SatEncoder::CircuitRepresentation& circuitRepresentation, z3::solver& solver); // construct z3 instance. Assumes prepocessCircuit() has been run before.
+    void                                                               constructMiterInstance(SatEncoder::CircuitRepresentation& circuitOneRepresentation, SatEncoder::CircuitRepresentation& circuitTwoRepresentation, z3::solver& solver);
+    static bool                                                        isSatisfiable(z3::solver& solver);
+    Statistics                                                         stats;
 };
 
 #endif //QMAP_SATENCODER_HPP
