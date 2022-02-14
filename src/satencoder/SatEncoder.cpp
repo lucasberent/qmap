@@ -76,6 +76,7 @@ bool SatEncoder::isSatisfiable(solver& solver) {
         std::cerr << "UNKNOWN" << std::endl;
     }
     std::cout << "STATS: " << solver.statistics();
+    //std::cout << "STATS: " << solver.get_model();
     return result;
 }
 
@@ -184,7 +185,7 @@ void SatEncoder::constructSatInstance(SatEncoder::CircuitRepresentation& circuit
     stats.nrOfGenerators    = generatorCnt;
 
     // bitwidth required to encode the generators
-    const auto bitwidth = static_cast<std::size_t>(std::ceil(std::log(generatorCnt)));
+    const auto bitwidth = static_cast<std::size_t>(std::ceil(std::log2(generatorCnt)));
 
     // whether the number of generators is a power of two or not
     bool blockingConstraintsNeeded = std::log2(generatorCnt) < static_cast<double>(bitwidth);
@@ -223,6 +224,15 @@ void SatEncoder::constructSatInstance(SatEncoder::CircuitRepresentation& circuit
             std::cout << cons << std::endl;
         }
     }
+
+    if (blockingConstraintsNeeded) {
+        std::cout << "Blocking Constraints: " << std::endl;
+        for (const auto& var: vars) {
+            const auto cons = var < ctx.bv_val(static_cast<std::uint64_t>(generatorCnt), bitwidth);
+            solver.add(cons); // [x^l]_2 < m
+            std::cout << cons << std::endl;
+        }
+    }
 }
 
 void SatEncoder::constructMiterInstance(SatEncoder::CircuitRepresentation& circOneRep, SatEncoder::CircuitRepresentation& circTwoRep, z3::solver& solver) {
@@ -231,7 +241,7 @@ void SatEncoder::constructMiterInstance(SatEncoder::CircuitRepresentation& circO
     stats.nrOfGenerators    = generatorCnt;
 
     // bitwidth required to encode the generators
-    const auto bitwidth = static_cast<std::size_t>(std::ceil(std::log(generatorCnt)));
+    const auto bitwidth = static_cast<std::size_t>(std::ceil(std::log2(generatorCnt)));
 
     // whether the number of generators is a power of two or not
     bool blockingConstraintsNeeded = std::log2(generatorCnt) < static_cast<double>(bitwidth);
@@ -261,14 +271,16 @@ void SatEncoder::constructMiterInstance(SatEncoder::CircuitRepresentation& circO
             const auto g1 = generators.at(circOneRep.idGeneratorMap.at(from));
             const auto g2 = generators.at(circOneRep.idGeneratorMap.at(to));
 
-            // create [x^l]_2 = i => [x^l']_2 = k for each generator mapping
-            const auto left  = varsOne[i] == ctx.bv_val(static_cast<std::uint64_t>(g1), bitwidth);
-            const auto right = varsOne[i + 1U] == ctx.bv_val(static_cast<std::uint64_t>(g2), bitwidth);
-            const auto cons  = implies(left, right);
+            // create [x^l]_2 = i <=> [x^l']_2 = k for each generator mapping
+            const auto left    = varsOne[i] == ctx.bv_val(static_cast<std::uint64_t>(g1), bitwidth);
+            const auto right   = varsOne[i + 1U] == ctx.bv_val(static_cast<std::uint64_t>(g2), bitwidth);
+            const auto cons    = implies(left, right);
+            const auto revcons = implies(right, left);
             solver.add(cons);
-
+            solver.add(revcons);
             stats.nrOfFunctionalConstr++;
             std::cout << cons << std::endl;
+            std::cout << revcons << std::endl;
         }
     }
 
@@ -303,14 +315,17 @@ void SatEncoder::constructMiterInstance(SatEncoder::CircuitRepresentation& circO
             const auto g1 = generators.at(circTwoRep.idGeneratorMap.at(from));
             const auto g2 = generators.at(circTwoRep.idGeneratorMap.at(to));
 
-            // create [x^l]_2 = i => [x^l']_2 = k for each generator mapping
-            const auto left  = varsTwo[i] == ctx.bv_val(static_cast<std::uint64_t>(g1), bitwidth);
-            const auto right = varsTwo[i + 1U] == ctx.bv_val(static_cast<std::uint64_t>(g2), bitwidth);
-            const auto cons  = implies(left, right);
+            // create [x^l]_2 = i <=> [x^l']_2 = k for each generator mapping
+            const auto left    = varsTwo[i] == ctx.bv_val(static_cast<std::uint64_t>(g1), bitwidth);
+            const auto right   = varsTwo[i + 1U] == ctx.bv_val(static_cast<std::uint64_t>(g2), bitwidth);
+            const auto cons    = implies(left, right);
+            const auto revcons = implies(right, left);
+            solver.add(revcons);
             solver.add(cons);
 
             stats.nrOfFunctionalConstr++;
             std::cout << cons << std::endl;
+            std::cout << revcons << std::endl;
         }
     }
 
@@ -323,7 +338,7 @@ void SatEncoder::constructMiterInstance(SatEncoder::CircuitRepresentation& circO
         }
     }
 
-    /// create miter structure
+    // create miter structure
     // if initial signals are the same, then the final signals have to be equal as well
     const auto initial = varsOne.front() == varsTwo.front();
     const auto final   = varsOne.back() != varsTwo.back();
