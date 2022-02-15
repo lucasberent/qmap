@@ -138,8 +138,8 @@ TEST_P(SatEncoderPTest, CheckEqualWhenEqualTwoInputs) {
 TEST_P(SatEncoderTest, SatWithoutInputs) {
     SatEncoder               sat_encoder;
     std::vector<std::string> inputs;
-
-    sat_encoder.checkSatisfiability(circuitOne, inputs);
+    std::string              file = "";
+    sat_encoder.checkSatisfiability(circuitOne, inputs, file);
 }
 TEST_P(SatEncoderTest, SatWithInputs) {
     SatEncoder               sat_encoder;
@@ -147,7 +147,8 @@ TEST_P(SatEncoderTest, SatWithInputs) {
     inputs.emplace_back("XX");
     inputs.emplace_back("Zz");
     inputs.emplace_back("xZ");
-    sat_encoder.checkSatisfiability(circuitOne, inputs);
+    std::string file = "";
+    sat_encoder.checkSatisfiability(circuitOne, inputs, file);
 }
 
 /* Benchmarking */
@@ -161,15 +162,27 @@ TEST_F(SatEncoderBenchmarking, GrowingNrOfQubitsForDepth10) {
     size_t             stepsize      = 10;
     size_t             maxNrOfQubits = 1000;
     std::random_device rd;
+    std::ostringstream oss;
 
-    for (; nrOfQubits < 3; nrOfQubits += stepsize) {
+    auto t  = std::time(nullptr);
+    auto tm = *std::localtime(&t);
+    oss << std::put_time(&tm, "%d-%m-%Y");
+    auto          filename = oss.str();
+    std::string   filep    = "/home/luca/Desktop/benchmark " + filename + ".json";
+    std::ofstream outfile(filep, std::fstream::app);
+    outfile << "{ \"benchmarks\" : [";
+    outfile.close();
+    for (; nrOfQubits < 30; nrOfQubits += stepsize) {
         SatEncoder               sat_encoder;
         std::vector<std::string> inputs;
 
         qc::RandomCliffordCircuit circOne(nrOfQubits, depth, rd());
         qc::CircuitOptimizer::flattenOperations(circOne);
-        sat_encoder.checkSatisfiability(circOne, inputs);
+        sat_encoder.checkSatisfiability(circOne, inputs, filep);
     }
+    std::ofstream outfile2(filep, std::fstream::app);
+    outfile2 << "]}";
+    outfile2.close();
 }
 
 TEST_F(SatEncoderBenchmarking, GrowingDepthForFiveQubits) {

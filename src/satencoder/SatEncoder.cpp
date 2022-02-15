@@ -10,6 +10,7 @@
 #include <boost/uuid/uuid_io.hpp>         // streaming operators etc.
 #include <chrono>
 #include <nlohmann/json.hpp>
+#include <sys/stat.h>
 using json = nlohmann::json;
 //
 // Created by lucas on 25/01/2022.
@@ -35,7 +36,7 @@ bool SatEncoder::testEqual(qc::QuantumComputation& circuitOne, qc::QuantumComput
     stats.equal = equal;
     return equal; // if unsat circuits are equal
 }
-void SatEncoder::checkSatisfiability(qc::QuantumComputation& circuitOne, std::vector<std::string>& inputs) {
+void SatEncoder::checkSatisfiability(qc::QuantumComputation& circuitOne, std::vector<std::string>& inputs, std::string& filename) {
     if (!isClifford(circuitOne)) {
         std::cerr << "Circuit is not Clifford Circuit." << std::endl;
         return;
@@ -47,7 +48,7 @@ void SatEncoder::checkSatisfiability(qc::QuantumComputation& circuitOne, std::ve
     auto       after                 = std::chrono::high_resolution_clock::now();
     const auto preprocessingDuration = std::chrono::duration_cast<std::chrono::milliseconds>(after - before);
     std::cout << "Preprocessing construction complete - elapsed time (ms) for this task: " << preprocessingDuration.count() << std::endl;
-    
+
     before = std::chrono::high_resolution_clock::now();
     z3::context ctx{};
     z3::solver  solver(ctx);
@@ -57,17 +58,14 @@ void SatEncoder::checkSatisfiability(qc::QuantumComputation& circuitOne, std::ve
     std::cout << "SAT construction complete - elapsed time (ms) for this task: " << satConstructionDuration.count() << std::endl;
 
     this->isSatisfiable(solver);
-    //benchmark file
-    auto               t  = std::time(nullptr);
-    auto               tm = *std::localtime(&t);
-    std::ostringstream oss;
-    oss << std::put_time(&tm, "%d-%m-%Y %H-%M-%S");
-    auto          str = oss.str();
-    std::ofstream outfile("/home/luca/Desktop/benchmark " + str + ".json");
-
-    nlohmann::json j;
-    stats.to_json(j, stats);
-    outfile << j;
+    // print to benchmark file
+    if (!filename.empty()) {
+        std::cerr << "printinf" << filename << std::endl;
+        std::ofstream  outfile(filename, std::fstream::app);
+        nlohmann::json j;
+        stats.to_json(j, stats);
+        outfile << "," << j;
+    }
 }
 
 bool SatEncoder::isSatisfiable(solver& solver) {
@@ -95,7 +93,6 @@ bool SatEncoder::isSatisfiable(solver& solver) {
         } else {
             val = solver.statistics().uint_value(i);
         }
-        std::cout << "inserting " << key << "," << val << std::endl;
         stats.z3StatsMap.emplace(key, val);
     }
     return result;

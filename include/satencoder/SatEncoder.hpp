@@ -30,7 +30,7 @@ public:
      * @param circuitOne circuit to construct SAT instance for
      * @param inputs input states to consider. In stabilizer representation, e.g., ZZ == |00>
      */
-    void checkSatisfiability(qc::QuantumComputation& circuitOne, std::vector<std::string>& inputs);
+    void checkSatisfiability(qc::QuantumComputation& circuitOne, std::vector<std::string>& inputs, std::string& filename);
 
 private:
     struct Statistics {
