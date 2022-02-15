@@ -10,7 +10,10 @@
 #include <boost/uuid/uuid.hpp>
 #include <chrono>
 #include <locale>
+#include <ostream>
 #include <z3++.h>
+#include <nlohmann/json.hpp>
+using json = nlohmann::json;
 
 class SatEncoder {
 public:
@@ -31,10 +34,17 @@ public:
 
 private:
     struct Statistics {
-        std::size_t nrOfGates            = 0U; // # gates in ckt
-        std::size_t nrOfSatVars          = 0U; // # sat variables
-        std::size_t nrOfGenerators       = 0U; // # unique generators appearing in ckt for given inputs
-        std::size_t nrOfFunctionalConstr = 0U; // # functional z3 constraint
+        std::size_t                   nrOfGates            = 0U; // # gates in ckt
+        std::size_t                   nrOfSatVars          = 0U; // # sat variables
+        std::size_t                   nrOfGenerators       = 0U; // # unique generators appearing in ckt for given inputs
+        std::size_t                   nrOfFunctionalConstr = 0U; // # functional z3 constraint
+        std::size_t                   circuitDepth         = 0U;
+        std::size_t                   nrOfDiffInputStates  = 0U;
+        std::map<std::string, double> z3StatsMap;
+        bool                          equal       = false;
+        bool                          satisfiable = false;
+        void                          to_json(json& j, const Statistics& stat);
+        void                          from_json(const json& j, Statistics& stat);
     };
 
     class QState {
@@ -70,7 +80,7 @@ private:
     SatEncoder::CircuitRepresentation                                  preprocessCircuit(qc::DAG& dag, std::vector<std::string>& inputs);                                  // construct data structures needed for SAT encoding. Input expected as string of stabilizers, e.g. XZZX = +00+, default = Z...Z = 0...0
     void                                                               constructSatInstance(SatEncoder::CircuitRepresentation& circuitRepresentation, z3::solver& solver); // construct z3 instance. Assumes prepocessCircuit() has been run before.
     void                                                               constructMiterInstance(SatEncoder::CircuitRepresentation& circuitOneRepresentation, SatEncoder::CircuitRepresentation& circuitTwoRepresentation, z3::solver& solver);
-    static bool                                                        isSatisfiable(z3::solver& solver);
+    bool                                                               isSatisfiable(z3::solver& solver);
     Statistics                                                         stats;
 };
 

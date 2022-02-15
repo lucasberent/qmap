@@ -1,4 +1,4 @@
-OPENQASM 2.0;
+OPENQASM 2.0; // for testing clifford circuit - without measurements
 include "qelib1.inc";
 
 qreg q[2];		// create a quantum register with 2 qubits
