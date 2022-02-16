@@ -83,6 +83,7 @@ private:
     bool                                                               isSatisfiable(z3::solver& solver);
     Statistics                                                         stats;
     std::size_t                                                        nrOfInputGenerators = 0;
+    std::size_t                                                        uniqueGenCnt        = 0;
 };
 
 #endif //QMAP_SATENCODER_HPP
