@@ -29,84 +29,40 @@ protected:
     qc::QuantumComputation circuitOne{};
     qc::QuantumComputation circuitTwo{};
 };
-TEST_F(SatEncoderTest, CheckEqualWhenNotEqualNoInputs) {
-    circuitTwo.import(test_example_dir + "ghz.qasm");
-    circuitOne.import(test_example_dir + "bell.qasm");
+TEST_F(SatEncoderTest, CheckEqualWhenEqualRandomCircuits) {
+    std::random_device        rd;
+    std::mt19937              gen(rd());
+    qc::RandomCliffordCircuit circOne(2, 1, gen());
+    qc::CircuitOptimizer::flattenOperations(circOne);
+    auto circTwo = circOne.clone();
+
     SatEncoder               sat_encoder;
     std::vector<std::string> inputs;
-
-    bool result = sat_encoder.testEqual(circuitOne, circuitTwo, inputs);
-    EXPECT_EQ(result, false);
-
-    circuitTwo.import(test_example_dir + "bell.qasm");
-    circuitOne.import(test_example_dir + "simons.qasm");
-    sat_encoder = SatEncoder();
-    result      = sat_encoder.testEqual(circuitOne, circuitTwo, inputs);
-    EXPECT_EQ(result, false);
-
-    circuitOne.import(test_example_dir + "simons.qasm");
-    circuitTwo.import(test_example_dir + "ghz.qasm");
-    sat_encoder = SatEncoder();
-    result      = sat_encoder.testEqual(circuitOne, circuitTwo, inputs);
-    EXPECT_EQ(result, false);
+    std::string              filename{};
+    bool                     result = sat_encoder.testEqual(circOne, circTwo, inputs, filename);
+    EXPECT_EQ(result, true);
 }
-TEST_F(SatEncoderTest, CheckEqualWhenNotEqualWithInputs) {
-    circuitTwo.import(test_example_dir + "ghz.qasm");
-    circuitOne.import(test_example_dir + "bell.qasm");
+
+TEST_F(SatEncoderTest, CheckEqualWhenEqualRandomCircuitsWithInputs) {
+    std::random_device        rd;
+    std::mt19937              gen(rd());
+    qc::RandomCliffordCircuit circOne(50, 10, gen());
+    qc::CircuitOptimizer::flattenOperations(circOne);
+    auto circTwo = circOne.clone();
+
     SatEncoder               sat_encoder;
     std::vector<std::string> inputs;
-    inputs.emplace_back("XX");
-    inputs.emplace_back("Zz");
-    inputs.emplace_back("xZ");
-    inputs.emplace_back("xx");
-    inputs.emplace_back("zz");
+    inputs.emplace_back("ZX");
+    inputs.emplace_back("ZZ");
+    inputs.emplace_back("YZ");
     inputs.emplace_back("YY");
+    inputs.emplace_back("XZ");
+    std::string filename{};
 
-    bool result = sat_encoder.testEqual(circuitOne, circuitTwo, inputs);
-    EXPECT_EQ(result, false);
-
-    circuitTwo.import(test_example_dir + "bell.qasm");
-    circuitOne.import(test_example_dir + "simons.qasm");
-    sat_encoder = SatEncoder();
-    result      = sat_encoder.testEqual(circuitOne, circuitTwo, inputs);
-    EXPECT_EQ(result, false);
-
-    circuitOne.import(test_example_dir + "simons.qasm");
-    circuitTwo.import(test_example_dir + "ghz.qasm");
-    sat_encoder = SatEncoder();
-    result      = sat_encoder.testEqual(circuitOne, circuitTwo, inputs);
-    EXPECT_EQ(result, false);
+    bool result = sat_encoder.testEqual(circOne, circTwo, inputs, filename);
+    EXPECT_EQ(result, true);
 }
-TEST_F(SatEncoderTest, CheckEqualWhenRandomCircuits) {
-    qc::RandomCliffordCircuit circOne(2, 3, 3);
-    qc::RandomCliffordCircuit circTwo(3, 2, 4);
-    qc::CircuitOptimizer::flattenOperations(circOne);
-    qc::CircuitOptimizer::flattenOperations(circTwo);
 
-    SatEncoder               sat_encoder;
-    std::vector<std::string> inputs;
-
-    bool result = sat_encoder.testEqual(circOne, circTwo, inputs);
-    EXPECT_EQ(result, false);
-}
-TEST_F(SatEncoderTest, CheckEqualWhenUnequalRandomCircuits) {
-    qc::RandomCliffordCircuit circOne(2, 3, 3);
-    auto                      circTwo = circOne.clone();
-
-    qc::CircuitOptimizer::flattenOperations(circOne);
-    qc::CircuitOptimizer::flattenOperations(circTwo);
-
-    std::random_device              rd;
-    std::mt19937                    gen(rd());
-    std::uniform_int_distribution<> distr(1, circTwo.size());
-    circTwo.erase(circTwo.begin() + distr(gen));
-
-    SatEncoder               sat_encoder;
-    std::vector<std::string> inputs;
-
-    bool result = sat_encoder.testEqual(circOne, circTwo, inputs);
-    EXPECT_EQ(result, false);
-}
 INSTANTIATE_TEST_SUITE_P(SatEncoder, SatEncoderPTest,
                          testing::Values(
                                  "bell",
@@ -121,8 +77,8 @@ INSTANTIATE_TEST_SUITE_P(SatEncoder, SatEncoderPTest,
 TEST_P(SatEncoderPTest, CheckEqualWhenEqualNoInputs) {
     SatEncoder               sat_encoder;
     std::vector<std::string> inputs;
-
-    bool result = sat_encoder.testEqual(circuitOne, circuitTwo, inputs);
+    std::string              filename{};
+    bool                     result = sat_encoder.testEqual(circuitOne, circuitTwo, inputs, filename);
     EXPECT_EQ(result, true);
 }
 TEST_P(SatEncoderPTest, CheckEqualWhenEqualTwoInputs) {
@@ -131,10 +87,23 @@ TEST_P(SatEncoderPTest, CheckEqualWhenEqualTwoInputs) {
 
     inputs.emplace_back("ZX");
     inputs.emplace_back("ZZ");
-
-    bool result = sat_encoder.testEqual(circuitOne, circuitTwo, inputs);
+    std::string filename{};
+    bool        result = sat_encoder.testEqual(circuitOne, circuitTwo, inputs, filename);
     EXPECT_EQ(result, true);
 }
+
+TEST_P(SatEncoderPTest, CheckEqualWhenNotEqualTwoInputs) {
+    SatEncoder               sat_encoder;
+    std::vector<std::string> inputs;
+
+    inputs.emplace_back("ZX");
+    inputs.emplace_back("ZZ");
+    std::string filename{};
+    circuitTwo.erase(circuitTwo.begin());
+    bool result = sat_encoder.testEqual(circuitOne, circuitTwo, inputs, filename);
+    EXPECT_EQ(result, true);
+}
+
 TEST_P(SatEncoderTest, SatWithoutInputs) {
     SatEncoder               sat_encoder;
     std::vector<std::string> inputs;
@@ -152,7 +121,7 @@ TEST_P(SatEncoderTest, SatWithInputs) {
 }
 
 /* Benchmarking */
-class SatEncoderBenchmarking: public testing::TestWithParam<std::string> {
+/*class SatEncoderBenchmarking: public testing::TestWithParam<std::string> {
 protected:
     std::string test_example_dir = "../../examples/";
 };
@@ -185,10 +154,41 @@ TEST_F(SatEncoderBenchmarking, GrowingNrOfQubitsForDepth10) {
     outfile2.close();
 }
 
-TEST_F(SatEncoderBenchmarking, GrowingDepthForFiveQubits) {
-}
-TEST_F(SatEncoderBenchmarking, GrowingNumberOfQubitsAndDepth) {
-}
-
 TEST_F(SatEncoderBenchmarking, GrowingNumberOfQubitsRandomFaults) {
-}
+    const size_t       depth         = 10;
+    size_t             nrOfQubits    = 2;
+    size_t             stepsize      = 10;
+    size_t             maxNrOfQubits = 1000;
+    std::random_device rd;
+    std::ostringstream oss;
+    std::mt19937       gen(rd());
+
+    auto t  = std::time(nullptr);
+    auto tm = *std::localtime(&t);
+    oss << std::put_time(&tm, "%d-%m-%Y");
+    auto          timestamp = oss.str();
+    std::string   filename    = "/home/luca/Desktop/benchmarkEC " + timestamp + ".json";
+    std::ofstream outfile(filename, std::fstream::app);
+    outfile << "{ \"benchmarks\" : [";
+    outfile.close();
+    for (; nrOfQubits < 30; nrOfQubits += stepsize) {
+        SatEncoder               sat_encoder;
+        std::vector<std::string> inputs;
+
+        qc::RandomCliffordCircuit circOne(nrOfQubits, depth, gen());
+        qc::CircuitOptimizer::flattenOperations(circOne);
+        auto circTwo = circOne.clone();
+
+        std::uniform_int_distribution<> distr(1, circTwo.size());
+        int                             randomNumber;
+        randomNumber = 1 + rand() % 2;
+        if (randomNumber == 1) {
+            circTwo.erase(circTwo.begin() + distr(gen));
+        }
+        sat_encoder.testEqual(circOne,circTwo, inputs, filename);
+    }
+    std::ofstream outfile2(filename, std::fstream::app);
+    outfile2 << "]}";
+    outfile2.close();
+
+}*/

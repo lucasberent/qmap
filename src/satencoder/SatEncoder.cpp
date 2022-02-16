@@ -15,11 +15,16 @@ using json = nlohmann::json;
 //
 // Created by lucas on 25/01/2022.
 //
-bool SatEncoder::testEqual(qc::QuantumComputation& circuitOne, qc::QuantumComputation& circuitTwo, std::vector<std::string>& inputs) {
+bool SatEncoder::testEqual(qc::QuantumComputation& circuitOne, qc::QuantumComputation& circuitTwo, std::vector<std::string>& inputs, std::string& filename) {
     if (!isClifford(circuitOne) || !isClifford(circuitTwo)) {
         std::cerr << "Circuits are not Clifford circuits" << std::endl;
         return false;
     }
+    if (circuitOne.empty() || circuitTwo.empty()) {
+        std::cerr << "Both circuits must be non-empy" << std::endl;
+        return false;
+    }
+
     qc::DAG                           dagOne     = qc::CircuitOptimizer::constructDAG(circuitOne);
     qc::DAG                           dagTwo     = qc::CircuitOptimizer::constructDAG(circuitTwo);
     SatEncoder::CircuitRepresentation circOneRep = preprocessCircuit(dagOne, inputs);
@@ -34,7 +39,16 @@ bool SatEncoder::testEqual(qc::QuantumComputation& circuitOne, qc::QuantumComput
     std::cout << "SAT construction complete - elapsed time (ms) for this task: " << satConstructionDuration.count() << std::endl;
     bool equal  = !isSatisfiable(solver);
     stats.equal = equal;
-    return equal; // if unsat circuits are equal
+
+    // for benchmarking
+    if (!filename.empty()) {
+        std::cerr << "printinf" << filename << std::endl;
+        std::ofstream  outfile(filename, std::fstream::app);
+        nlohmann::json j;
+        stats.to_json(j, stats);
+        outfile << "," << j;
+    }
+    return equal;
 }
 void SatEncoder::checkSatisfiability(qc::QuantumComputation& circuitOne, std::vector<std::string>& inputs, std::string& filename) {
     if (!isClifford(circuitOne)) {
@@ -79,6 +93,7 @@ bool SatEncoder::isSatisfiable(solver& solver) {
         std::cout << "SATISFIABLE" << std::endl;
         stats.satisfiable = true;
         result            = true;
+        std::cout << "model " << solver.get_model() << std::endl;
     } else if (sat == check_result::unsat) {
         std::cout << "UNSATISFIABLE" << std::endl;
     } else {
@@ -145,6 +160,10 @@ SatEncoder::CircuitRepresentation SatEncoder::preprocessCircuit(qc::DAG& dag, st
         //no generator <> generator mapping for initial level
     }
 
+    if (nrOfInputGenerators == 0) { //only in first pass
+        nrOfInputGenerators = uniqueGenCnt;
+    }
+
     for (std::size_t levelCnt = 0; levelCnt < nrOfLevels; levelCnt++) {
         for (std::size_t qubitCnt = 0U; qubitCnt < inputSize; qubitCnt++) { //apply operation of current level for each qubit
             nrOfOpsOnQubit = dag.at(qubitCnt).size();
@@ -159,31 +178,39 @@ SatEncoder::CircuitRepresentation SatEncoder::preprocessCircuit(qc::DAG& dag, st
                     //apply gate of level to each generator
                     for (auto& currState: states) {
                         if (gate->getType() == qc::OpType::H) {
-                            //std::cout << "level " << levelCnt << " applying H to qubit " << target << std::endl;
                             currState.applyH(target);
                         } else if (gate->getType() == qc::OpType::S) {
-                            //std::cout << "level " << levelCnt << " applying S to qubit " << target << std::endl;
                             currState.applyS(target);
                         } else if (gate->getType() == qc::OpType::Sdag) {
-                            //std::cout << "level " << levelCnt << " applying Sdag to qubit " << target << std::endl;
                             currState.applyS(target); // Sdag == SSS
+                            currState.applyS(target);
+                            currState.applyS(target);
+                        } else if (gate->getType() == qc::OpType::Z) {
+                            currState.applyH(target);
+                            currState.applyS(target);
+                            currState.applyS(target);
+                            currState.applyH(target);
+                        } else if (gate->getType() == qc::OpType::X && !gate->isControlled()) {
+                            currState.applyH(target);
+                            currState.applyS(target);
+                            currState.applyS(target);
+                        } else if (gate->getType() == qc::OpType::Y) {
+                            currState.applyH(target);
+                            currState.applyS(target);
                             currState.applyS(target);
                             currState.applyS(target);
                         } else if (gate->isControlled() && gate->getType() == qc::OpType::X) { //CNOT
                             if (qubitCnt == control) {                                         //CNOT is for control and target in DAG, only apply if current qubit is control
-                                //std::cout << "level " << levelCnt << " applying CNOT with target: " << target << " control: " << control << std::endl;
                                 currState.applyCNOT(control, target);
                             }
                         } else {
-                            //todo error operation not supported
+                            // std::cerr << "unsupported operation" << std::endl;
                         }
                     }
                 }
             }
         }
         for (auto& state: states) {
-            //std::cout << "state " << std::endl;
-            //state.printStateTableau();
             auto               currLevelGen = state.getLevelGenerator();                      //extract generator representation from tableau (= list of paulis for each qubit)
             auto               inspair      = generators.emplace(currLevelGen, uniqueGenCnt); // put generator into global map if not already present
             boost::uuids::uuid genId{};
@@ -221,17 +248,14 @@ void SatEncoder::constructSatInstance(SatEncoder::CircuitRepresentation& circuit
     vars.reserve(depth + 1U);
     std::string bvName = "x^";
 
-    //std::cout << "Variables: " << std::endl;
     for (std::size_t k = 0U; k <= depth; k++) {
         // create bitvector [x^k]_2 with respective bitwidth for each level k of ckt
         std::stringstream ss{};
         ss << bvName << k; //
         vars.emplace_back(ctx.bv_const(ss.str().c_str(), bitwidth));
-        //std::cout << vars.back() << std::endl;
         stats.nrOfSatVars++;
     }
 
-    //std::cout << "Functional Constraints: " << std::endl;
     for (std::size_t i = 0U; i < depth; i++) {
         const auto layer = circuitRepresentation.generatorMappings.at(i); // generator<>generator map for level i
         for (const auto& [from, to]: layer) {
@@ -244,17 +268,13 @@ void SatEncoder::constructSatInstance(SatEncoder::CircuitRepresentation& circuit
             const auto cons  = implies(left, right);
             solver.add(cons);
             stats.nrOfFunctionalConstr++;
-            //std::cout << cons << std::endl;
         }
     }
 
     if (blockingConstraintsNeeded) {
-        //std::cout << "Blocking Constraints: " << std::endl;
         for (const auto& var: vars) {
             const auto cons = var < ctx.bv_val(static_cast<std::uint64_t>(generatorCnt), bitwidth);
             solver.add(cons); // [x^l]_2 < m
-            //std::cout << cons << std::endl;
-            stats.nrOfFunctionalConstr++;
         }
     }
 }
@@ -263,13 +283,11 @@ void SatEncoder::constructMiterInstance(SatEncoder::CircuitRepresentation& circO
     // number of unique generators that need to be encoded
     const auto generatorCnt = generators.size();
     stats.nrOfGenerators    = generatorCnt;
-
     // bitwidth required to encode the generators
     const auto bitwidth = static_cast<std::size_t>(std::ceil(std::log2(generatorCnt)));
 
     // whether the number of generators is a power of two or not
     bool blockingConstraintsNeeded = std::log2(generatorCnt) < static_cast<double>(bitwidth);
-
     // z3 context used throughout this function
     auto& ctx = solver.ctx();
 
@@ -279,16 +297,16 @@ void SatEncoder::constructMiterInstance(SatEncoder::CircuitRepresentation& circO
     varsOne.reserve(depthOne + 1U);
     std::string bvName = "x^";
 
-    std::cout << "Variables: " << std::endl;
     for (std::size_t k = 0U; k <= depthOne; k++) {
         // create bitvector [x^k]_2 with respective bitwidth for each level k of ckt
         std::stringstream ss{};
         ss << bvName << k; //
-        varsOne.emplace_back(ctx.bv_const(ss.str().c_str(), bitwidth));
-        //std::cout << varsOne.back() << std::endl;
+        const auto tmp = ctx.bv_const(ss.str().c_str(), bitwidth);
+        varsOne.emplace_back(tmp);
+        solver.add(0 <= tmp);
+        stats.nrOfSatVars++;
     }
 
-    std::cout << "Functional Constraints: " << std::endl;
     for (std::size_t i = 0U; i < depthOne; i++) {
         const auto layer = circOneRep.generatorMappings.at(i); // generator<>generator map for level i
         for (const auto& [from, to]: layer) {
@@ -298,41 +316,36 @@ void SatEncoder::constructMiterInstance(SatEncoder::CircuitRepresentation& circO
             // create [x^l]_2 = i <=> [x^l']_2 = k for each generator mapping
             const auto left    = varsOne[i] == ctx.bv_val(static_cast<std::uint64_t>(g1), bitwidth);
             const auto right   = varsOne[i + 1U] == ctx.bv_val(static_cast<std::uint64_t>(g2), bitwidth);
-            const auto cons    = implies(left, right);
+            const auto cons    = (left == right);
             const auto revcons = implies(right, left);
             solver.add(cons);
             solver.add(revcons);
             stats.nrOfFunctionalConstr++;
-            //std::cout << cons << std::endl;
-            //std::cout << revcons << std::endl;
         }
     }
 
     if (blockingConstraintsNeeded) {
-        std::cout << "Blocking Constraints: " << std::endl;
         for (const auto& var: varsOne) {
             const auto cons = var < ctx.bv_val(static_cast<std::uint64_t>(generatorCnt), bitwidth);
             solver.add(cons); // [x^l]_2 < m
-            //std::cout << cons << std::endl;
         }
     }
-
     /// encode second circuit
     auto              depthTwo = circTwoRep.generatorMappings.size();
     std::vector<expr> varsTwo{};
     varsOne.reserve(depthTwo + 1U);
     bvName = "x'^";
 
-    std::cout << "Variables: " << std::endl;
     for (std::size_t k = 0U; k <= depthTwo; k++) {
         // create bitvector [x^k]_2 with respective bitwidth for each level k of ckt
         std::stringstream ss{};
         ss << bvName << k; //
-        varsTwo.emplace_back(ctx.bv_const(ss.str().c_str(), bitwidth));
-        //std::cout << varsTwo.back() << std::endl;
+        const auto tmp = ctx.bv_const(ss.str().c_str(), bitwidth);
+        varsTwo.emplace_back(tmp);
+        solver.add(0 <= tmp);
+        stats.nrOfSatVars++;
     }
 
-    std::cout << "Functional Constraints: " << std::endl;
     for (std::size_t i = 0U; i < depthTwo; i++) {
         const auto layer = circTwoRep.generatorMappings.at(i); // generator<>generator map for level i
         for (const auto& [from, to]: layer) {
@@ -342,33 +355,33 @@ void SatEncoder::constructMiterInstance(SatEncoder::CircuitRepresentation& circO
             // create [x^l]_2 = i <=> [x^l']_2 = k for each generator mapping
             const auto left    = varsTwo[i] == ctx.bv_val(static_cast<std::uint64_t>(g1), bitwidth);
             const auto right   = varsTwo[i + 1U] == ctx.bv_val(static_cast<std::uint64_t>(g2), bitwidth);
-            const auto cons    = implies(left, right);
+            const auto cons    = (left == right);
             const auto revcons = implies(right, left);
             solver.add(revcons);
             solver.add(cons);
 
             stats.nrOfFunctionalConstr++;
-            //std::cout << cons << std::endl;
-            //std::cout << revcons << std::endl;
         }
     }
 
     if (blockingConstraintsNeeded) {
-        //std::cout << "Blocking Constraints: " << std::endl;
         for (const auto& var: varsTwo) {
             const auto cons = var < ctx.bv_val(static_cast<std::uint64_t>(generatorCnt), bitwidth);
             solver.add(cons); // [x^l]_2 < m
-            //std::cout << cons << std::endl;
         }
     }
-
     // create miter structure
     // if initial signals are the same, then the final signals have to be equal as well
-    const auto initial = varsOne.front() == varsTwo.front();
-    const auto final   = varsOne.back() != varsTwo.back();
-    const auto miter   = implies(initial, final);
-    //std::cout << "Miter: " << miter << std::endl;
-    solver.add(miter);
+    const auto equalInputs    = varsOne.front() == varsTwo.front();
+    const auto unequalOutputs = varsOne.back() != varsTwo.back();
+    const auto nrOfInputs     = ctx.bv_val(static_cast<std::uint64_t>(nrOfInputGenerators), bitwidth);
+    const auto input1         = varsOne.front() < nrOfInputs;
+    const auto input2         = varsTwo.front() < nrOfInputs;
+
+    solver.add(equalInputs);
+    solver.add(unequalOutputs);
+    solver.add(input1);
+    solver.add(input2);
 }
 
 bool SatEncoder::isClifford(qc::QuantumComputation& qc) {

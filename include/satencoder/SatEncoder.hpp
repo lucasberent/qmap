@@ -10,9 +10,9 @@
 #include <boost/uuid/uuid.hpp>
 #include <chrono>
 #include <locale>
+#include <nlohmann/json.hpp>
 #include <ostream>
 #include <z3++.h>
-#include <nlohmann/json.hpp>
 using json = nlohmann::json;
 
 class SatEncoder {
@@ -24,7 +24,7 @@ public:
      * @param circuitTwo second circuit
      * @param inputs input states to consider. In stabilizer representation, e.g. ZZ == |00>
      */
-    bool testEqual(qc::QuantumComputation& circuit, qc::QuantumComputation& circuitTwo, std::vector<std::string>& inputs);
+    bool testEqual(qc::QuantumComputation& circuit, qc::QuantumComputation& circuitTwo, std::vector<std::string>& inputs, std::string& filename);
     /**
      * Constructs SAT instance for input circuit and checks satisfiability for given inputs
      * @param circuitOne circuit to construct SAT instance for
@@ -82,6 +82,7 @@ private:
     void                                                               constructMiterInstance(SatEncoder::CircuitRepresentation& circuitOneRepresentation, SatEncoder::CircuitRepresentation& circuitTwoRepresentation, z3::solver& solver);
     bool                                                               isSatisfiable(z3::solver& solver);
     Statistics                                                         stats;
+    std::size_t                                                        nrOfInputGenerators = 0;
 };
 
 #endif //QMAP_SATENCODER_HPP
