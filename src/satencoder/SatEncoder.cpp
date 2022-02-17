@@ -16,8 +16,8 @@ using json = nlohmann::json;
 // Created by lucas on 25/01/2022.
 //
 bool SatEncoder::testEqual(qc::QuantumComputation& circuitOne, qc::QuantumComputation& circuitTwo, std::vector<std::string>& inputs, std::string& filename) {
-    std::cout << circuitOne << std::endl;
-    std::cout << circuitTwo << std::endl;
+    //std::cout << circuitOne << std::endl;
+    //std::cout << circuitTwo << std::endl;
 
     if (!isClifford(circuitOne) || !isClifford(circuitTwo)) {
         std::cerr << "Circuits are not Clifford circuits" << std::endl;
@@ -27,25 +27,24 @@ bool SatEncoder::testEqual(qc::QuantumComputation& circuitOne, qc::QuantumComput
         std::cerr << "Both circuits must be non-empy" << std::endl;
         return false;
     }
-
+    stats.nrOfDiffInputStates                    = inputs.size();
+    stats.nrOfQubits                             = circuitOne.getNqubits();
     qc::DAG                           dagOne     = qc::CircuitOptimizer::constructDAG(circuitOne);
     qc::DAG                           dagTwo     = qc::CircuitOptimizer::constructDAG(circuitTwo);
     SatEncoder::CircuitRepresentation circOneRep = preprocessCircuit(dagOne, inputs);
     SatEncoder::CircuitRepresentation circTwoRep = preprocessCircuit(dagTwo, inputs);
+    std::cout << "Preprocessing complete - elapsed time (ms) for this task: " << stats.preprocTime << std::endl;
 
-    const auto  before = std::chrono::high_resolution_clock::now();
     z3::context ctx{};
     z3::solver  solver(ctx);
     constructMiterInstance(circOneRep, circTwoRep, solver);
-    const auto after                   = std::chrono::high_resolution_clock::now();
-    const auto satConstructionDuration = std::chrono::duration_cast<std::chrono::milliseconds>(after - before);
-    std::cout << "SAT construction complete - elapsed time (ms) for this task: " << satConstructionDuration.count() << std::endl;
+    std::cout << "SAT construction complete - elapsed time (ms) for this task: " << stats.satConstructionTime << std::endl;
+
     bool equal  = !isSatisfiable(solver);
     stats.equal = equal;
 
     // for benchmarking
     if (!filename.empty()) {
-        std::cerr << "printinf" << filename << std::endl;
         std::ofstream  outfile(filename, std::fstream::app);
         nlohmann::json j;
         stats.to_json(j, stats);
@@ -58,26 +57,22 @@ void SatEncoder::checkSatisfiability(qc::QuantumComputation& circuitOne, std::ve
         std::cerr << "Circuit is not Clifford Circuit." << std::endl;
         return;
     }
-    qc::DAG dag = qc::CircuitOptimizer::constructDAG(circuitOne);
+    stats.nrOfDiffInputStates = inputs.size();
+    stats.nrOfQubits          = circuitOne.getNqubits();
+    qc::DAG dag               = qc::CircuitOptimizer::constructDAG(circuitOne);
 
-    auto       before                = std::chrono::high_resolution_clock::now();
-    auto       circRep               = preprocessCircuit(dag, inputs);
-    auto       after                 = std::chrono::high_resolution_clock::now();
-    const auto preprocessingDuration = std::chrono::duration_cast<std::chrono::milliseconds>(after - before);
-    std::cout << "Preprocessing construction complete - elapsed time (ms) for this task: " << preprocessingDuration.count() << std::endl;
+    auto circRep = preprocessCircuit(dag, inputs);
+    std::cout << "Preprocessing construction complete - elapsed time (ms) for this task: " << stats.preprocTime << std::endl;
 
-    before = std::chrono::high_resolution_clock::now();
     z3::context ctx{};
     z3::solver  solver(ctx);
     constructSatInstance(circRep, solver);
-    after                        = std::chrono::high_resolution_clock::now();
-    auto satConstructionDuration = std::chrono::duration_cast<std::chrono::milliseconds>(after - before);
-    std::cout << "SAT construction complete - elapsed time (ms) for this task: " << satConstructionDuration.count() << std::endl;
+    std::cout << "SAT construction complete - elapsed time (ms) for this task: " << stats.satConstructionTime << std::endl;
 
-    this->isSatisfiable(solver);
+    bool sat          = this->isSatisfiable(solver);
+    stats.satisfiable = sat;
     // print to benchmark file
     if (!filename.empty()) {
-        std::cerr << "printinf" << filename << std::endl;
         std::ofstream  outfile(filename, std::fstream::app);
         nlohmann::json j;
         stats.to_json(j, stats);
@@ -90,19 +85,20 @@ bool SatEncoder::isSatisfiable(solver& solver) {
     auto before            = std::chrono::high_resolution_clock::now();
     auto sat               = solver.check();
     auto after             = std::chrono::high_resolution_clock::now();
-    auto z3SolvingDuration = std::chrono::duration_cast<std::chrono::milliseconds>(after - before);
-    std::cout << "Z3 solving complete - elapsed time (ms) for this task: " << z3SolvingDuration.count() << std::endl;
+    auto z3SolvingDuration = std::chrono::duration_cast<std::chrono::milliseconds>(after - before).count();
+    //std::cout << "Z3 solving complete - elapsed time (ms) for this task: " << z3SolvingDuration << std::endl;
+    stats.solvingTime = z3SolvingDuration;
     if (sat == check_result::sat) {
-        std::cout << "SATISFIABLE" << std::endl;
+        //std::cout << "SATISFIABLE" << std::endl;
         stats.satisfiable = true;
         result            = true;
-        std::cout << "model " << solver.get_model() << std::endl;
+        //std::cout << "model " << solver.get_model() << std::endl;
     } else if (sat == check_result::unsat) {
-        std::cout << "UNSATISFIABLE" << std::endl;
+        //std::cout << "UNSATISFIABLE" << std::endl;
     } else {
-        std::cerr << "UNKNOWN" << std::endl;
+        // std::cerr << "UNKNOWN" << std::endl;
     }
-    std::cout << solver.statistics() << std::endl;
+    //std::cout << solver.statistics() << std::endl;
     for (size_t i = 0; i < solver.statistics().size(); i++) {
         auto   key = solver.statistics().key(i);
         double val;
@@ -117,7 +113,8 @@ bool SatEncoder::isSatisfiable(solver& solver) {
 }
 
 SatEncoder::CircuitRepresentation SatEncoder::preprocessCircuit(qc::DAG& dag, std::vector<std::string>& inputs) {
-    std::cout << "new ckt" << std::endl;
+    auto before = std::chrono::high_resolution_clock::now();
+    //std::cout << "new ckt" << std::endl;
     unsigned long                     inputSize      = dag.size();
     unsigned long                     nrOfLevels     = 0;
     std::size_t                       nrOfOpsOnQubit = 0;
@@ -133,12 +130,11 @@ SatEncoder::CircuitRepresentation SatEncoder::preprocessCircuit(qc::DAG& dag, st
             nrOfLevels = tmp;
         }
     }
-    stats.circuitDepth = nrOfLevels;
+    stats.circuitDepth = nrOfLevels > stats.circuitDepth ? nrOfLevels : stats.circuitDepth;
     std::vector<std::map<boost::uuids::uuid, boost::uuids::uuid>> vec(nrOfLevels);
     representation.generatorMappings = vec;
 
     if (inputs.size() > 1) {
-        stats.nrOfDiffInputStates = inputs.size();
         for (auto& input: inputs) {
             states.push_back(initializeState(nrOfQubits, input));
         }
@@ -146,10 +142,9 @@ SatEncoder::CircuitRepresentation SatEncoder::preprocessCircuit(qc::DAG& dag, st
         states.push_back(initializeState(nrOfQubits, {}));
     }
 
-    std::cout << "Init sttes" << std::endl;
+    //std::cout << "Init sttes" << std::endl;
     // store generators of input state
     for (auto& state: states) {
-        state.printStateTableau();
         auto               initLevelGenerator = state.getLevelGenerator();
         auto               inspair            = generators.emplace(initLevelGenerator, uniqueGenCnt); // put generator into global map if not already present
         boost::uuids::uuid genId{};
@@ -216,10 +211,6 @@ SatEncoder::CircuitRepresentation SatEncoder::preprocessCircuit(qc::DAG& dag, st
             }
         }
         for (auto& state: states) {
-            if (levelCnt + 1 == nrOfLevels) {
-                std::cout << "final state" << std::endl;
-                state.printStateTableau();
-            }
             auto               currLevelGen = state.getLevelGenerator();                      //extract generator representation from tableau (= list of paulis for each qubit)
             auto               inspair      = generators.emplace(currLevelGen, uniqueGenCnt); // put generator into global map if not already present
             boost::uuids::uuid genId{};
@@ -235,10 +226,13 @@ SatEncoder::CircuitRepresentation SatEncoder::preprocessCircuit(qc::DAG& dag, st
             state.SetPrevGenId(genId);                                                                         // update previous generator id for next state
         }
     }
+    auto after = std::chrono::high_resolution_clock::now();
+    stats.preprocTime += std::chrono::duration_cast<std::chrono::milliseconds>(after - before).count();
     return representation;
 }
 //construct z3 instance from preprocessing information
 void SatEncoder::constructSatInstance(SatEncoder::CircuitRepresentation& circuitRepresentation, z3::solver& solver) {
+    auto before = std::chrono::high_resolution_clock::now();
     // number of unique generators that need to be encoded
     const auto generatorCnt = generators.size();
     stats.nrOfGenerators    = generatorCnt;
@@ -282,13 +276,16 @@ void SatEncoder::constructSatInstance(SatEncoder::CircuitRepresentation& circuit
 
     if (blockingConstraintsNeeded) {
         for (const auto& var: vars) {
-            const auto cons = var < ctx.bv_val(static_cast<std::uint64_t>(generatorCnt), bitwidth);
+            const auto cons = ult(var, ctx.bv_val(static_cast<std::uint64_t>(generatorCnt), bitwidth));
             solver.add(cons); // [x^l]_2 < m
         }
     }
+    auto after                = std::chrono::high_resolution_clock::now();
+    stats.satConstructionTime = std::chrono::duration_cast<std::chrono::milliseconds>(after - before).count();
 }
 
 void SatEncoder::constructMiterInstance(SatEncoder::CircuitRepresentation& circOneRep, SatEncoder::CircuitRepresentation& circTwoRep, z3::solver& solver) {
+    auto before = std::chrono::high_resolution_clock::now();
     // number of unique generators that need to be encoded
     const auto generatorCnt = generators.size();
     stats.nrOfGenerators    = generatorCnt;
@@ -306,19 +303,19 @@ void SatEncoder::constructMiterInstance(SatEncoder::CircuitRepresentation& circO
     varsOne.reserve(depthOne + 1U);
     std::string bvName = "x^";
 
-    std::cout << "Vars1" << std::endl;
+    //std::cout << "Vars1" << std::endl;
     for (std::size_t k = 0U; k <= depthOne; k++) {
         // create bitvector [x^k]_2 with respective bitwidth for each level k of ckt
         std::stringstream ss{};
         ss << bvName << k; //
         const auto tmp = ctx.bv_const(ss.str().c_str(), bitwidth);
         varsOne.emplace_back(tmp);
-        std::cout << tmp << std::endl;
+        //std::cout << tmp << std::endl;
         //solver.add(ule(ctx.bv_val(static_cast<std::uint64_t>(0), bitwidth) ,tmp));
         stats.nrOfSatVars++;
     }
 
-    std::cout << "Func " << std::endl;
+    // std::cout << "Func " << std::endl;
     for (std::size_t i = 0U; i < depthOne; i++) {
         const auto layer = circOneRep.generatorMappings.at(i); // generator<>generator map for level i
         for (const auto& [from, to]: layer) {
@@ -326,21 +323,21 @@ void SatEncoder::constructMiterInstance(SatEncoder::CircuitRepresentation& circO
             const auto g2 = generators.at(circOneRep.idGeneratorMap.at(to));
 
             // create [x^l]_2 = i <=> [x^l']_2 = k for each generator mapping
-            const auto left    = varsOne[i] == ctx.bv_val(static_cast<std::uint64_t>(g1), bitwidth);
-            const auto right   = varsOne[i + 1U] == ctx.bv_val(static_cast<std::uint64_t>(g2), bitwidth);
-            const auto cons    = (left == right);
+            const auto left  = varsOne[i] == ctx.bv_val(static_cast<std::uint64_t>(g1), bitwidth);
+            const auto right = varsOne[i + 1U] == ctx.bv_val(static_cast<std::uint64_t>(g2), bitwidth);
+            const auto cons  = (left == right);
             solver.add(cons);
-            std::cout << cons << std::endl;
+            //std::cout << cons << std::endl;
             stats.nrOfFunctionalConstr++;
         }
     }
 
-    std::cout << "Blocking" << std::endl;
+    //std::cout << "Blocking" << std::endl;
     if (blockingConstraintsNeeded) {
         for (const auto& var: varsOne) {
             const auto cons = ult(var, ctx.bv_val(static_cast<std::uint64_t>(generatorCnt), bitwidth));
             solver.add(cons); // [x^l]_2 < m
-            std::cout << cons << std::endl;
+            //std::cout << cons << std::endl;
         }
     }
     /// encode second circuit
@@ -349,7 +346,7 @@ void SatEncoder::constructMiterInstance(SatEncoder::CircuitRepresentation& circO
     varsOne.reserve(depthTwo + 1U);
     bvName = "x'^";
 
-    std::cout << "Vars2" << std::endl;
+    //std::cout << "Vars2" << std::endl;
     for (std::size_t k = 0U; k <= depthTwo; k++) {
         // create bitvector [x^k]_2 with respective bitwidth for each level k of ckt
         std::stringstream ss{};
@@ -358,10 +355,10 @@ void SatEncoder::constructMiterInstance(SatEncoder::CircuitRepresentation& circO
         varsTwo.emplace_back(tmp);
         //solver.add(ule(ctx.bv_val(static_cast<std::uint64_t>(0), bitwidth), tmp));
         stats.nrOfSatVars++;
-        std::cout << tmp << std::endl;
+        //std::cout << tmp << std::endl;
     }
 
-    std::cout << "Func2" << std::endl;
+    //std::cout << "Func2" << std::endl;
     for (std::size_t i = 0U; i < depthTwo; i++) {
         const auto layer = circTwoRep.generatorMappings.at(i); // generator<>generator map for level i
         for (const auto& [from, to]: layer) {
@@ -369,21 +366,21 @@ void SatEncoder::constructMiterInstance(SatEncoder::CircuitRepresentation& circO
             const auto g2 = generators.at(circTwoRep.idGeneratorMap.at(to));
 
             // create [x^l]_2 = i <=> [x^l']_2 = k for each generator mapping
-            const auto left    = varsTwo[i] == ctx.bv_val(static_cast<std::uint64_t>(g1), bitwidth);
-            const auto right   = varsTwo[i + 1U] == ctx.bv_val(static_cast<std::uint64_t>(g2), bitwidth);
-            const auto cons    = (left == right);
+            const auto left  = varsTwo[i] == ctx.bv_val(static_cast<std::uint64_t>(g1), bitwidth);
+            const auto right = varsTwo[i + 1U] == ctx.bv_val(static_cast<std::uint64_t>(g2), bitwidth);
+            const auto cons  = (left == right);
             solver.add(cons);
-            std::cout << cons << std::endl;
+            //std::cout << cons << std::endl;
             stats.nrOfFunctionalConstr++;
         }
     }
 
-    std::cout << "Blocking2 " << std::endl;
+    //std::cout << "Blocking2 " << std::endl;
     if (blockingConstraintsNeeded) {
         for (const auto& var: varsTwo) {
             const auto cons = ult(var, ctx.bv_val(static_cast<std::uint64_t>(generatorCnt), bitwidth));
             solver.add(cons); // [x^l]_2 < m
-            std::cout << cons << std::endl;
+            //std::cout << cons << std::endl;
         }
     }
     // create miter structure
@@ -394,15 +391,17 @@ void SatEncoder::constructMiterInstance(SatEncoder::CircuitRepresentation& circO
     const auto input1         = ult(varsOne.front(), nrOfInputs);
     const auto input2         = ult(varsTwo.front(), nrOfInputs);
 
-    std::cout << "miter " << std::endl;
-    std::cout << equalInputs << std::endl;
-    std::cout << unequalOutputs << std::endl;
-    std::cout << input1 << std::endl;
-    std::cout << input2 << std::endl;
+    //std::cout << "miter " << std::endl;
+    //std::cout << equalInputs << std::endl;
+    //std::cout << unequalOutputs << std::endl;
+    //std::cout << input1 << std::endl;
+    //d::cout << input2 << std::endl;
     solver.add(equalInputs);
     solver.add(unequalOutputs);
     solver.add(input1);
     solver.add(input2);
+    auto after                = std::chrono::high_resolution_clock::now();
+    stats.satConstructionTime = std::chrono::duration_cast<std::chrono::milliseconds>(after - before).count();
 }
 
 bool SatEncoder::isClifford(qc::QuantumComputation& qc) {
@@ -566,6 +565,7 @@ void SatEncoder::QState::printStateTableau() {
 void SatEncoder::Statistics::to_json(json& j, const Statistics& stat) {
     j = json{
             {"numGates", stat.nrOfGates},
+            {"nrOfQubits", stat.nrOfQubits},
             {"numSatVarsCreated", stat.nrOfSatVars},
             {"numGenerators", stat.nrOfGenerators},
             {"numFuncConstr", stat.nrOfFunctionalConstr},
@@ -573,18 +573,25 @@ void SatEncoder::Statistics::to_json(json& j, const Statistics& stat) {
             {"numInputStates", stat.nrOfDiffInputStates},
             {"equivalent", stat.equal},
             {"satisfiable", stat.satisfiable},
+            {"preprocTime", stat.preprocTime},
+            {"solvingTime", stat.solvingTime},
+            {"satConstructionTime", stat.satConstructionTime},
             {"z3map", stat.z3StatsMap}
 
     };
 }
 void SatEncoder::Statistics::from_json(const json& j, Statistics& stat) {
     j.at("numGates").get_to(stat.nrOfGates),
+            j.at("nrOfQubits").get_to(stat.nrOfQubits),
             j.at("numSatVarsCreated").get_to(stat.nrOfSatVars),
             j.at("numGenerators").get_to(stat.nrOfGenerators),
             j.at("numFuncConstr").get_to(stat.nrOfFunctionalConstr),
             j.at("circDepth").get_to(stat.circuitDepth),
             j.at("numInputStates").get_to(stat.nrOfDiffInputStates),
             j.at("equivalent").get_to(stat.equal),
-            j.at("satisfiable").get_to(stat.satisfiable);
-    j.at("z3map").get_to(stat.z3StatsMap);
+            j.at("satisfiable").get_to(stat.satisfiable),
+            j.at("preprocTime").get_to(preprocTime),
+            j.at("solvingTime").get_to(stat.solvingTime),
+            j.at("satConstructionTime").get_to(stat.satConstructionTime),
+            j.at("z3map").get_to(stat.z3StatsMap);
 }

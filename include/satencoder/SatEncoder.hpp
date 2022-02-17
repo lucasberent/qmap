@@ -35,14 +35,18 @@ public:
 private:
     struct Statistics {
         std::size_t                   nrOfGates            = 0U; // # gates in ckt
+        std::size_t                   nrOfQubits           = 0U; //
         std::size_t                   nrOfSatVars          = 0U; // # sat variables
         std::size_t                   nrOfGenerators       = 0U; // # unique generators appearing in ckt for given inputs
         std::size_t                   nrOfFunctionalConstr = 0U; // # functional z3 constraint
         std::size_t                   circuitDepth         = 0U;
         std::size_t                   nrOfDiffInputStates  = 0U;
         std::map<std::string, double> z3StatsMap;
-        bool                          equal       = false;
-        bool                          satisfiable = false;
+        bool                          equal               = false;
+        bool                          satisfiable         = false;
+        std::size_t                   preprocTime         = 0U;
+        std::size_t                   solvingTime         = 0U;
+        std::size_t                   satConstructionTime = 0U;
         void                          to_json(json& j, const Statistics& stat);
         void                          from_json(const json& j, Statistics& stat);
     };
