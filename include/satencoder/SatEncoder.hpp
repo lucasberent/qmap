@@ -1,18 +1,19 @@
-//
-// Created by lucas on 25/01/2022.
-//
-
 #ifndef QMAP_SATENCODER_HPP
 #define QMAP_SATENCODER_HPP
-#include "QuantumComputation.hpp"
-#include "boost/dynamic_bitset.hpp"
 
+#include "CircuitOptimizer.hpp"
+#include "QuantumComputation.hpp"
+
+#include <boost/dynamic_bitset.hpp>
 #include <boost/uuid/uuid.hpp>
+#include <boost/uuid/uuid_generators.hpp> // generators
+#include <boost/uuid/uuid_io.hpp>         // streaming operators etc.
 #include <chrono>
 #include <locale>
 #include <nlohmann/json.hpp>
 #include <ostream>
 #include <z3++.h>
+
 using json = nlohmann::json;
 
 class SatEncoder {
@@ -86,8 +87,8 @@ private:
     void                                                               constructMiterInstance(SatEncoder::CircuitRepresentation& circuitOneRepresentation, SatEncoder::CircuitRepresentation& circuitTwoRepresentation, z3::solver& solver);
     bool                                                               isSatisfiable(z3::solver& solver);
     Statistics                                                         stats;
-    std::size_t                                                        nrOfInputGenerators = 0;
-    std::size_t                                                        uniqueGenCnt        = 0;
+    std::size_t                                                        nrOfInputGenerators = 0U;
+    std::size_t                                                        uniqueGenCnt        = 0U;
 };
 
 #endif //QMAP_SATENCODER_HPP
