@@ -47,8 +47,8 @@ private:
         std::size_t                   preprocTime         = 0U;
         std::size_t                   solvingTime         = 0U;
         std::size_t                   satConstructionTime = 0U;
-        void                          to_json(json& j, const Statistics& stat);
-        void                          from_json(const json& j, Statistics& stat);
+        json                          to_json();
+        void                          from_json(const json& j);
     };
 
     class QState {

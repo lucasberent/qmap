@@ -45,10 +45,8 @@ bool SatEncoder::testEqual(qc::QuantumComputation& circuitOne, qc::QuantumComput
 
     // for benchmarking
     if (!filename.empty()) {
-        std::ofstream  outfile(filename, std::fstream::app);
-        nlohmann::json j;
-        stats.to_json(j, stats);
-        outfile << "," << j;
+        std::ofstream outfile(filename, std::fstream::app);
+        outfile << "," << stats.to_json();
     }
     return equal;
 }
@@ -73,10 +71,8 @@ void SatEncoder::checkSatisfiability(qc::QuantumComputation& circuitOne, std::ve
     stats.satisfiable = sat;
     // print to benchmark file
     if (!filename.empty()) {
-        std::ofstream  outfile(filename, std::fstream::app);
-        nlohmann::json j;
-        stats.to_json(j, stats);
-        outfile << "," << j;
+        std::ofstream outfile(filename, std::fstream::app);
+        outfile << "," << stats.to_json();
     }
 }
 
@@ -562,36 +558,36 @@ void SatEncoder::QState::printStateTableau() {
     }
     std::cout << std::endl;
 }
-void SatEncoder::Statistics::to_json(json& j, const Statistics& stat) {
-    j = json{
-            {"numGates", stat.nrOfGates},
-            {"nrOfQubits", stat.nrOfQubits},
-            {"numSatVarsCreated", stat.nrOfSatVars},
-            {"numGenerators", stat.nrOfGenerators},
-            {"numFuncConstr", stat.nrOfFunctionalConstr},
-            {"circDepth", stat.circuitDepth},
-            {"numInputStates", stat.nrOfDiffInputStates},
-            {"equivalent", stat.equal},
-            {"satisfiable", stat.satisfiable},
-            {"preprocTime", stat.preprocTime},
-            {"solvingTime", stat.solvingTime},
-            {"satConstructionTime", stat.satConstructionTime},
-            {"z3map", stat.z3StatsMap}
+json SatEncoder::Statistics::to_json() {
+    return json{
+            {"numGates", nrOfGates},
+            {"nrOfQubits", nrOfQubits},
+            {"numSatVarsCreated", nrOfSatVars},
+            {"numGenerators", nrOfGenerators},
+            {"numFuncConstr", nrOfFunctionalConstr},
+            {"circDepth", circuitDepth},
+            {"numInputs", nrOfDiffInputStates},
+            {"equivalent", equal},
+            {"satisfiable", satisfiable},
+            {"preprocTime", preprocTime},
+            {"solvingTime", solvingTime},
+            {"satConstructionTime", satConstructionTime},
+            {"z3map", z3StatsMap}
 
     };
 }
-void SatEncoder::Statistics::from_json(const json& j, Statistics& stat) {
-    j.at("numGates").get_to(stat.nrOfGates),
-            j.at("nrOfQubits").get_to(stat.nrOfQubits),
-            j.at("numSatVarsCreated").get_to(stat.nrOfSatVars),
-            j.at("numGenerators").get_to(stat.nrOfGenerators),
-            j.at("numFuncConstr").get_to(stat.nrOfFunctionalConstr),
-            j.at("circDepth").get_to(stat.circuitDepth),
-            j.at("numInputStates").get_to(stat.nrOfDiffInputStates),
-            j.at("equivalent").get_to(stat.equal),
-            j.at("satisfiable").get_to(stat.satisfiable),
-            j.at("preprocTime").get_to(preprocTime),
-            j.at("solvingTime").get_to(stat.solvingTime),
-            j.at("satConstructionTime").get_to(stat.satConstructionTime),
-            j.at("z3map").get_to(stat.z3StatsMap);
+void SatEncoder::Statistics::from_json(const json& j) {
+    j.at("numGates").get_to(nrOfGates);
+    j.at("nrOfQubits").get_to(nrOfQubits);
+    j.at("numSatVarsCreated").get_to(nrOfSatVars);
+    j.at("numGenerators").get_to(nrOfGenerators);
+    j.at("numFuncConstr").get_to(nrOfFunctionalConstr);
+    j.at("circDepth").get_to(circuitDepth);
+    j.at("numInputs").get_to(nrOfDiffInputStates);
+    j.at("equivalent").get_to(equal);
+    j.at("satisfiable").get_to(satisfiable);
+    j.at("preprocTime").get_to(preprocTime);
+    j.at("solvingTime").get_to(solvingTime);
+    j.at("satConstructionTime").get_to(satConstructionTime);
+    j.at("z3map").get_to(z3StatsMap);
 }
