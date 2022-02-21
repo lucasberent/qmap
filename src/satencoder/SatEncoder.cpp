@@ -1,20 +1,5 @@
 #include "satencoder/SatEncoder.hpp"
 
-#include "CircuitOptimizer.hpp"
-#include "boost/dynamic_bitset.hpp"
-#include "exact/ExactMapper.hpp"
-#include "z3++.h"
-
-#include <boost/uuid/uuid.hpp>            // uuid class
-#include <boost/uuid/uuid_generators.hpp> // generators
-#include <boost/uuid/uuid_io.hpp>         // streaming operators etc.
-#include <chrono>
-#include <nlohmann/json.hpp>
-#include <sys/stat.h>
-using json = nlohmann::json;
-//
-// Created by lucas on 25/01/2022.
-//
 bool SatEncoder::testEqual(qc::QuantumComputation& circuitOne, qc::QuantumComputation& circuitTwo, std::vector<std::string>& inputs, std::string& filename) {
     //std::cout << circuitOne << std::endl;
     //std::cout << circuitTwo << std::endl;
@@ -45,10 +30,8 @@ bool SatEncoder::testEqual(qc::QuantumComputation& circuitOne, qc::QuantumComput
 
     // for benchmarking
     if (!filename.empty()) {
-        std::ofstream  outfile(filename, std::fstream::app);
-        nlohmann::json j;
-        stats.to_json(j, stats);
-        outfile << "," << j;
+        std::ofstream outfile(filename, std::fstream::app);
+        outfile << "," << stats.to_json();
     }
     return equal;
 }
@@ -73,14 +56,12 @@ void SatEncoder::checkSatisfiability(qc::QuantumComputation& circuitOne, std::ve
     stats.satisfiable = sat;
     // print to benchmark file
     if (!filename.empty()) {
-        std::ofstream  outfile(filename, std::fstream::app);
-        nlohmann::json j;
-        stats.to_json(j, stats);
-        outfile << "," << j;
+        std::ofstream outfile(filename, std::fstream::app);
+        outfile << "," << stats.to_json();
     }
 }
 
-bool SatEncoder::isSatisfiable(solver& solver) {
+bool SatEncoder::isSatisfiable(z3::solver& solver) {
     bool result            = false;
     std::cout << "Starting SAT solving" << std::endl;
     auto before            = std::chrono::high_resolution_clock::now();
@@ -89,12 +70,12 @@ bool SatEncoder::isSatisfiable(solver& solver) {
     auto z3SolvingDuration = std::chrono::duration_cast<std::chrono::milliseconds>(after - before).count();
     //std::cout << "Z3 solving complete - elapsed time (ms) for this task: " << z3SolvingDuration << std::endl;
     stats.solvingTime = z3SolvingDuration;
-    if (sat == check_result::sat) {
+    if (sat == z3::check_result::sat) {
         //std::cout << "SATISFIABLE" << std::endl;
         stats.satisfiable = true;
         result            = true;
         //std::cout << "model " << solver.get_model() << std::endl;
-    } else if (sat == check_result::unsat) {
+    } else if (sat == z3::check_result::unsat) {
         //std::cout << "UNSATISFIABLE" << std::endl;
     } else {
         // std::cerr << "UNKNOWN" << std::endl;
@@ -248,7 +229,7 @@ void SatEncoder::constructSatInstance(SatEncoder::CircuitRepresentation& circuit
     auto& ctx = solver.ctx();
 
     const auto        depth = circuitRepresentation.generatorMappings.size();
-    std::vector<expr> vars{};
+    std::vector<z3::expr> vars{};
     vars.reserve(depth + 1U);
     std::string bvName = "x^";
 
@@ -300,7 +281,7 @@ void SatEncoder::constructMiterInstance(SatEncoder::CircuitRepresentation& circO
 
     /// encode first circuit
     const auto        depthOne = circOneRep.generatorMappings.size();
-    std::vector<expr> varsOne{};
+    std::vector<z3::expr> varsOne{};
     varsOne.reserve(depthOne + 1U);
     std::string bvName = "x^";
 
@@ -343,7 +324,7 @@ void SatEncoder::constructMiterInstance(SatEncoder::CircuitRepresentation& circO
     }
     /// encode second circuit
     auto              depthTwo = circTwoRep.generatorMappings.size();
-    std::vector<expr> varsTwo{};
+    std::vector<z3::expr> varsTwo{};
     varsOne.reserve(depthTwo + 1U);
     bvName = "x'^";
 
@@ -427,7 +408,7 @@ std::vector<boost::dynamic_bitset<>> SatEncoder::QState::getLevelGenerator() con
 
     for (std::size_t i = 0U; i < n; i++) {
         boost::dynamic_bitset<> gen(size);
-        for (std::size_t j = 0; j < n; j++) {
+        for (std::size_t j = 0U; j < n; j++) {
             gen[j] = x.at(i)[j];
         }
         for (std::size_t j = 0; j < n; j++) {
@@ -453,7 +434,7 @@ SatEncoder::QState SatEncoder::initializeState(unsigned long nrOfQubits, std::st
     for (std::size_t i = 0U; i < nrOfQubits; i++) {
         tx[i] = boost::dynamic_bitset(nrOfQubits);
         tz[i] = boost::dynamic_bitset(nrOfQubits);
-        for (std::size_t j = 0; j < nrOfQubits; j++) {
+        for (std::size_t j = 0U; j < nrOfQubits; j++) {
             if (i == j) {
                 tz[i][j] = true; // initial 0..0 state corresponds to x matrix all zero and z matrix = Id_n
             }
@@ -497,8 +478,7 @@ SatEncoder::QState SatEncoder::initializeState(unsigned long nrOfQubits, std::st
 }
 
 void SatEncoder::QState::applyCNOT(unsigned long control, unsigned long target) {
-    if (target > n || target < 0 ||
-        control > n || control < 0) {
+    if (target > n || control > n) {
         return;
     }
     for (std::size_t i = 0U; i < n; ++i) {
@@ -508,7 +488,7 @@ void SatEncoder::QState::applyCNOT(unsigned long control, unsigned long target) 
     }
 }
 void SatEncoder::QState::applyH(unsigned long target) {
-    if (target > n || target < 0) {
+    if (target > n) {
         return;
     }
     for (std::size_t i = 0U; i < n; i++) {
@@ -519,7 +499,7 @@ void SatEncoder::QState::applyH(unsigned long target) {
     }
 }
 void SatEncoder::QState::applyS(unsigned long target) {
-    if (target > n || target < 0) {
+    if (target > n) {
         return;
     }
     for (std::size_t i = 0U; i < n; ++i) {
@@ -551,11 +531,11 @@ void SatEncoder::QState::SetPrevGenId(const boost::uuids::uuid& prev_gen_id) {
 void SatEncoder::QState::printStateTableau() {
     std::cout << std::endl;
     for (std::size_t i = 0U; i < n; i++) {
-        for (std::size_t j = 0; j < n; j++) {
+        for (std::size_t j = 0U; j < n; j++) {
             std::cout << x.at(i)[j];
         }
         std::cout << "|";
-        for (std::size_t j = 0; j < n; j++) {
+        for (std::size_t j = 0U; j < n; j++) {
             std::cout << z.at(i)[j];
         }
         std::cout << "|";
@@ -564,36 +544,36 @@ void SatEncoder::QState::printStateTableau() {
     }
     std::cout << std::endl;
 }
-void SatEncoder::Statistics::to_json(json& j, const Statistics& stat) {
-    j = json{
-            {"numGates", stat.nrOfGates},
-            {"nrOfQubits", stat.nrOfQubits},
-            {"numSatVarsCreated", stat.nrOfSatVars},
-            {"numGenerators", stat.nrOfGenerators},
-            {"numFuncConstr", stat.nrOfFunctionalConstr},
-            {"circDepth", stat.circuitDepth},
-            {"numInputStates", stat.nrOfDiffInputStates},
-            {"equivalent", stat.equal},
-            {"satisfiable", stat.satisfiable},
-            {"preprocTime", stat.preprocTime},
-            {"solvingTime", stat.solvingTime},
-            {"satConstructionTime", stat.satConstructionTime},
-            {"z3map", stat.z3StatsMap}
+json SatEncoder::Statistics::to_json() {
+    return json{
+            {"numGates", nrOfGates},
+            {"nrOfQubits", nrOfQubits},
+            {"numSatVarsCreated", nrOfSatVars},
+            {"numGenerators", nrOfGenerators},
+            {"numFuncConstr", nrOfFunctionalConstr},
+            {"circDepth", circuitDepth},
+            {"numInputs", nrOfDiffInputStates},
+            {"equivalent", equal},
+            {"satisfiable", satisfiable},
+            {"preprocTime", preprocTime},
+            {"solvingTime", solvingTime},
+            {"satConstructionTime", satConstructionTime},
+            {"z3map", z3StatsMap}
 
     };
 }
-void SatEncoder::Statistics::from_json(const json& j, Statistics& stat) {
-    j.at("numGates").get_to(stat.nrOfGates),
-            j.at("nrOfQubits").get_to(stat.nrOfQubits),
-            j.at("numSatVarsCreated").get_to(stat.nrOfSatVars),
-            j.at("numGenerators").get_to(stat.nrOfGenerators),
-            j.at("numFuncConstr").get_to(stat.nrOfFunctionalConstr),
-            j.at("circDepth").get_to(stat.circuitDepth),
-            j.at("numInputStates").get_to(stat.nrOfDiffInputStates),
-            j.at("equivalent").get_to(stat.equal),
-            j.at("satisfiable").get_to(stat.satisfiable),
-            j.at("preprocTime").get_to(preprocTime),
-            j.at("solvingTime").get_to(stat.solvingTime),
-            j.at("satConstructionTime").get_to(stat.satConstructionTime),
-            j.at("z3map").get_to(stat.z3StatsMap);
+void SatEncoder::Statistics::from_json(const json& j) {
+    j.at("numGates").get_to(nrOfGates);
+    j.at("nrOfQubits").get_to(nrOfQubits);
+    j.at("numSatVarsCreated").get_to(nrOfSatVars);
+    j.at("numGenerators").get_to(nrOfGenerators);
+    j.at("numFuncConstr").get_to(nrOfFunctionalConstr);
+    j.at("circDepth").get_to(circuitDepth);
+    j.at("numInputs").get_to(nrOfDiffInputStates);
+    j.at("equivalent").get_to(equal);
+    j.at("satisfiable").get_to(satisfiable);
+    j.at("preprocTime").get_to(preprocTime);
+    j.at("solvingTime").get_to(solvingTime);
+    j.at("satConstructionTime").get_to(satConstructionTime);
+    j.at("z3map").get_to(z3StatsMap);
 }

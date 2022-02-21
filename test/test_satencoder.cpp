@@ -7,7 +7,6 @@
 #include "algorithms/RandomCliffordCircuit.hpp"
 #include "satencoder/SatEncoder.hpp"
 
-#include "gmock/gmock.h"
 #include "gtest/gtest.h"
 #include <filesystem>
 #include <locale>
@@ -125,16 +124,17 @@ TEST_P(SatEncoderPTest, CheckEqualWhenNotEqualTwoInputs) {
 TEST_P(SatEncoderPTest, SatWithoutInputs) {
     SatEncoder               sat_encoder;
     std::vector<std::string> inputs;
-    std::string              file = "";
+    std::string              file;
     sat_encoder.checkSatisfiability(circuitOne, inputs, file);
 }
+
 TEST_P(SatEncoderPTest, SatWithInputs) {
     SatEncoder               sat_encoder;
     std::vector<std::string> inputs;
     inputs.emplace_back("XX");
     inputs.emplace_back("Zz");
     inputs.emplace_back("xZ");
-    std::string file = "";
+    std::string file;
     sat_encoder.checkSatisfiability(circuitOne, inputs, file);
 }
 
