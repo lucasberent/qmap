@@ -82,6 +82,7 @@ void SatEncoder::checkSatisfiability(qc::QuantumComputation& circuitOne, std::ve
 
 bool SatEncoder::isSatisfiable(solver& solver) {
     bool result            = false;
+    std::cout << "Starting SAT solving" << std::endl;
     auto before            = std::chrono::high_resolution_clock::now();
     auto sat               = solver.check();
     auto after             = std::chrono::high_resolution_clock::now();
@@ -315,7 +316,7 @@ void SatEncoder::constructMiterInstance(SatEncoder::CircuitRepresentation& circO
         stats.nrOfSatVars++;
     }
 
-    // std::cout << "Func " << std::endl;
+    //std::cout << "Func " << std::endl;
     for (std::size_t i = 0U; i < depthOne; i++) {
         const auto layer = circOneRep.generatorMappings.at(i); // generator<>generator map for level i
         for (const auto& [from, to]: layer) {
@@ -488,6 +489,7 @@ SatEncoder::QState SatEncoder::initializeState(unsigned long nrOfQubits, std::st
                     result.applyS(i);
                     result.applyS(i);
                     result.applyS(i);
+                    break;
             }
         }
     }
